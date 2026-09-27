@@ -1,0 +1,5 @@
+Checking pipeline-alerts.rules.yaml
+  SUCCESS: 4 rules found
+
+  SUCCESS
+

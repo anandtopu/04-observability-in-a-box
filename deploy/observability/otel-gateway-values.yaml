@@ -1,0 +1,45 @@
+# otel-gateway: OpenTelemetry Collector contrib 0.161.0, chart open-telemetry/opentelemetry-collector
+# 0.173.1 (chart appVersion 0.160.0; the image is pinned newer). Spec section 5, M4. ADR-P04-1: apps
+# send OTLP here only; this release decides where telemetry goes (a customer overlay in M7).
+#   helm install otel-gateway open-telemetry/opentelemetry-collector --version 0.173.1 \
+#     -n observability --create-namespace -f deploy/observability/otel-gateway-values.yaml
+mode: deployment
+replicaCount: 2
+fullnameOverride: otel-gateway       # Service otel-gateway.observability, the P02 contract
+image: { repository: otel/opentelemetry-collector-contrib, tag: "0.161.0" }
+command: { name: otelcol-contrib }
+# memory_limiter (chart default: limit_percentage 80, spike 25) is a percentage of THIS limit:
+# the gateway starts refusing data at ~819 MiB instead of being OOM-killed at 1 GiB.
+resources:
+  requests: { cpu: 100m, memory: 256Mi }   # lab addition (spec gives only the limit)
+  limits: { memory: 1Gi }
+podDisruptionBudget: { enabled: true, minAvailable: 1 }
+presets: { kubernetesAttributes: { enabled: true } }
+# :8888 for the Collector's own otelcol_* metrics. Lab addition: close the chart's default Jaeger
+# and Zipkin ports; their receivers are disabled, and OTLP is the only accepted protocol (§9 spoofing).
+ports:
+  metrics: { enabled: true }
+  jaeger-compact: { enabled: false }
+  jaeger-thrift: { enabled: false }
+  jaeger-grpc: { enabled: false }
+  zipkin: { enabled: false }
+serviceMonitor: { enabled: true }      # kps picks it up (serviceMonitorSelectorNilUsesHelmValues: false)
+config:
+  receivers: { jaeger: null, zipkin: null, prometheus: null }
+  processors:
+    batch: null                      # batching moves into each exporter's sending_queue
+    k8s_attributes:
+      pod_association:               # logs arrive from the agent: match on pod UID, not source IP
+        - sources: [{ from: resource_attribute, name: k8s.pod.uid }]
+        - sources: [{ from: connection }]
+    resource:
+      attributes: [{ key: k8s.cluster.name, value: freightline-kind, action: upsert }]
+  exporters:
+    otlp_grpc/tempo: { endpoint: "tempo.monitoring:4317", tls: { insecure: true }, sending_queue: { batch: {} } }
+    otlp_http/prometheus: { endpoint: "http://kps-prometheus.monitoring:9090/api/v1/otlp", sending_queue: { batch: {} } }
+    otlp_http/loki: { endpoint: "http://loki.monitoring:3100/otlp", sending_queue: { batch: {} } }
+  service:
+    pipelines:
+      traces: { receivers: [otlp], processors: [memory_limiter, k8s_attributes, resource], exporters: [otlp_grpc/tempo] }
+      metrics: { receivers: [otlp], processors: [memory_limiter, k8s_attributes, resource], exporters: [otlp_http/prometheus] }
+      logs: { receivers: [otlp], processors: [memory_limiter, k8s_attributes, resource], exporters: [otlp_http/loki] }

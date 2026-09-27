@@ -1,0 +1,1 @@
+orders pod deletion with the gateway present: 10.8s  (M0, no gateway: 30s = 10s preStop + 20s blocked flush)

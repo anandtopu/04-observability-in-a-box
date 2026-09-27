@@ -1,0 +1,56 @@
+# FR-8: the pipeline alerts on its own queue depth, send failures and refused data (spec section 8).
+# Metric names are Collector 0.161's as scraped by the gateway ServiceMonitor: counters carry NO
+# _total suffix (the spec's *_total names would never match, so these alerts would never fire;
+# DEVIATIONS D-20). send_failed_* series only appear after the first failure.
+# Unit-tested with promtool: tests/pipeline-alerts.test.yaml.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: telemetry-pipeline
+  namespace: monitoring
+  labels: { app.kubernetes.io/part-of: p04-observability }
+spec:
+  groups:
+    - name: telemetry-pipeline
+      rules:
+        - alert: TelemetryExportFailing
+          # Any exporter failing to deliver for 10 minutes. Ticket in the lab; page for a
+          # contractual customer sink (M7's splunk_hec/cobalt gets its own page-level rule).
+          expr: |
+            sum by (exporter) (rate(otelcol_exporter_send_failed_spans[5m])) > 0
+            or sum by (exporter) (rate(otelcol_exporter_send_failed_metric_points[5m])) > 0
+            or sum by (exporter) (rate(otelcol_exporter_send_failed_log_records[5m])) > 0
+          for: 10m
+          labels: { severity: ticket, service: otel-gateway }
+          annotations:
+            summary: "Exporter {{ $labels.exporter }} is failing to send telemetry"
+            runbook_url: docs/runbooks/queue-filling.md
+        - alert: TelemetryQueueFilling
+          # Above 80% of the sending queue for 10 minutes: when it is full, new data is rejected
+          # (block_on_overflow defaults to false), so data loss is minutes away.
+          expr: max by (exporter) (otelcol_exporter_queue_size / otelcol_exporter_queue_capacity) > 0.8
+          for: 10m
+          labels: { severity: page, service: otel-gateway }
+          annotations:
+            summary: "Sending queue of {{ $labels.exporter }} is {{ $value | humanizePercentage }} full"
+            runbook_url: docs/runbooks/queue-filling.md
+        - alert: TelemetryRefused
+          # Usually memory_limiter pushback: the gateway is protecting itself; senders retry.
+          expr: |
+            sum by (receiver) (rate(otelcol_receiver_refused_spans[5m])) > 0
+            or sum by (receiver) (rate(otelcol_receiver_refused_metric_points[5m])) > 0
+            or sum by (receiver) (rate(otelcol_receiver_refused_log_records[5m])) > 0
+          labels: { severity: ticket, service: otel-gateway }
+          annotations:
+            summary: "Receiver {{ $labels.receiver }} is refusing data (memory_limiter pushback?)"
+        - alert: OrdersMetricsAbsent
+          # OTLP push has no `up` metric (ADR-P04-3): absence is the signal that orders or the
+          # gateway stopped delivering. Deviation from the spec (D-21): watch target_info, which every
+          # SDK exports every 15 s with or without traffic. The spec's
+          # http_server_request_duration_seconds_count only exists after a pod's first request, so a
+          # pod restarted in a quiet hour would page after 10 minutes with nothing wrong (seen in M4).
+          expr: absent_over_time(target_info{job="freightline/orders"}[10m])
+          labels: { severity: page, service: orders }
+          annotations:
+            summary: "No orders metrics for 10 minutes (app, agent or gateway not delivering)"
+            runbook_url: docs/runbooks/slo-burn.md

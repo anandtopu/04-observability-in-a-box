@@ -1,0 +1,16 @@
+Setup: orders pod replaced at 21:03 (shutdown test), one seed request at 21:09:07 so it has request series, then idle; only kubelet probes (startup/readiness every 2 s, liveness every 10 s) hit the pods.
+Gate run at 21:14:44:
+== spec M4 gate: idle traffic reads 0 for every Freightline job (probe filter works end to end)
+$ curl -s localhost:9090/api/v1/query --data-urlencode 'query=sum by (job) (rate(http_server_request_duration_seconds_count{job=~"freightline/.*"}[5m]))'
+{"status":"success","data":{"resultType":"vector","result":[{"metric":{"job":"freightline/inventory"},"value":[1790543684.431,"0"]},{"metric":{"job":"freightline/orders"},"value":[1790543684.431,"0"]}]}}
+PASS  idle rate for freightline/orders (0)
+PASS  idle rate for freightline/inventory (0)
+== 2 passed, 0 failed
+
+Probes really are running (kubelet probe counters, not traced):
+  inventory-7fbbcdcf6d-7zrvz Liveness: 623
+  inventory-7fbbcdcf6d-7zrvz Readiness: 3118
+  inventory-7fbbcdcf6d-7zrvz Startup: 1
+  orders-579f6d467f-ldpht Liveness: 69
+  orders-579f6d467f-ldpht Readiness: 348
+  orders-579f6d467f-ldpht Startup: 1

@@ -5,17 +5,21 @@ The target is spec section 3. This file tracks what exists today; `[x]` means bu
 ```text
  ZONE: workloads (ns freightline, PSA restricted)       ZONE: pipeline (ns observability)
  +-----------------------------------------+   OTLP    +---------------------------------------+
- | [x] orders (Go)  --HTTP+traceparent-->  |   :4317   | [ ] otel-gateway (contrib 0.161, x2)  |
- | [x] inventory (Python)                  |---------->|     memory_limiter > k8s_attributes > |
- |     SDK traces + metrics (OTLP/gRPC)    |  (M4; the |     resource > exporters with         |
- |     stdout JSON logs (trace_id,span_id) |  exporters|     sending_queue.batch               |
- | [x] postgres (1 instance, db per svc)   |  drop data+---------------------------------------+
- | [x] mailpit (SMTP sink for alerts)      |  until then)
- +-------------------+---------------------+
-                     | /var/log/pods
- +-------------------v---------------------+
- | [ ] otel-agent DaemonSet (M4)           |
- +-----------------------------------------+
+ | [x] orders (Go)  --HTTP+traceparent-->  |   :4317   | [x] otel-gateway (contrib 0.161, x2, PDB) |
+ | [x] inventory (Python)                  |---------->|     memory_limiter (80%/25% of 1Gi) >     |
+ |     SDK traces + metrics (OTLP/gRPC,    |           |     k8s_attributes (pod UID, then IP) >   |
+ |     metrics every 15 s)                 |           |     resource (k8s.cluster.name) >         |
+ |     stdout JSON logs (trace_id,span_id) |           |     otlp_grpc/tempo, otlp_http/prometheus,|
+ | [x] postgres (1 instance, db per svc)   |           |     otlp_http/loki (sending_queue.batch)  |
+ | [x] mailpit (SMTP sink for alerts)      |           |     :8888 otelcol_* -> ServiceMonitor     |
+ +-------------------+---------------------+           +-------------------------------------------+
+                     | /var/log/pods/freightline_*/app/*.log                ^ OTLP/gRPC
+ +-------------------v-----------------------------------------------------+-+
+ | [x] otel-agent DaemonSet: file_log > container parser > json_parser    |
+ |     (severity from level; trace_id/span_id -> record) > memory_limiter |
+ |     > k8s_attributes (pod UID; label app.kubernetes.io/name ->         |
+ |     service.name) > otlp_grpc                                          |
+ +------------------------------------------------------------------------+
  ZONE: backends (ns monitoring)   [x] Prometheus "kps" 3.14.0: OTLP receiver, exemplars, 12h (M2)
                                   [x] Alertmanager: page / ticket -> Mailpit, Watchdog -> null (M2)
                                   [x] Grafana 13.2.2 (datasources for Tempo/Loki pre-provisioned) (M2)
@@ -53,3 +57,16 @@ The target is spec section 3. This file tracks what exists today; `[x]` means bu
 | `OTEL_LOGS_EXPORTER` | `none` | logs via stdout and the node agent (ADR-P04-2) |
 
 **Instrumentation hygiene (M1, measured with a debug Collector):** probes produce no spans and no histogram samples (0 spans in about 77 s idle across 3 pods); server spans are named by route (`POST /v1/orders`, `POST /v1/reservations`) with `http.route` on the duration histogram; inventory emits 3 spans per request (server, INSERT, UPDATE) and orders 6 (server, client, pool.acquire ×2, query, UPDATE); histogram buckets include 0.25 s.
+
+## Self-monitoring (FR-8, M4)
+
+`deploy/observability/pipeline-alerts.yaml` (PrometheusRule `telemetry-pipeline`, promtool-tested):
+
+| Alert | Expression (Collector 0.161 names, no `_total`) | Severity |
+|---|---|---|
+| TelemetryExportFailing | `rate(otelcol_exporter_send_failed_{spans,metric_points,log_records}[5m]) > 0` for 10m, by exporter | ticket |
+| TelemetryQueueFilling | `otelcol_exporter_queue_size / otelcol_exporter_queue_capacity > 0.8` for 10m (capacity 1000) | page |
+| TelemetryRefused | `rate(otelcol_receiver_refused_{spans,metric_points,log_records}[5m]) > 0`, by receiver | ticket |
+| OrdersMetricsAbsent | `absent_over_time(target_info{job="freightline/orders"}[10m])` (D-21: not the request histogram, which a fresh idle pod does not export) | page |
+
+**Measured freshness (M4, n=3):** Loki 1.1 s; complete trace in Tempo 4.8–5.3 s (inventory's BatchSpanProcessor 5 s delay); newest metric sample 1.4–10.9 s old (15 s push interval).

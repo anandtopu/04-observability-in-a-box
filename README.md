@@ -6,7 +6,7 @@ A learning build from the FDE Onboarding Handbook: Beacon's standard observabili
 - dashboards and SLO burn-rate alerts as code;
 - a customer-export overlay for Splunk or Datadog behind a TLS-inspecting proxy.
 
-**Status:** M0–M3 done (Tier A kind, P04-lite app, instrumentation hygiene, Prometheus with the OTLP receiver, Tempo and Loki). Progress: [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md); departures from the spec: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md). The build is done in **Claude Code cloud sessions**, following [`docs/CLOUD_BUILD_PROMPT.md`](docs/CLOUD_BUILD_PROMPT.md).
+**Status:** M0–M4 done (Tier A kind, P04-lite app, instrumentation hygiene, Prometheus with the OTLP receiver, Tempo and Loki, gateway and agent Collectors). Progress: [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md); departures from the spec: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md). The build is done in **Claude Code cloud sessions**, following [`docs/CLOUD_BUILD_PROMPT.md`](docs/CLOUD_BUILD_PROMPT.md).
 
 | Path | What it is |
 |---|---|
@@ -84,6 +84,24 @@ helm install tempo oci://ghcr.io/grafana-community/helm-charts/tempo --version 3
 
 ```bash
 helm install loki oci://ghcr.io/grafana-community/helm-charts/loki --version 18.13.5 -n monitoring -f deploy/observability/loki-values.yaml --wait
+```
+
+Install the gateway and agent Collectors, then the pipeline alerts:
+
+```bash
+helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+```
+
+```bash
+helm install otel-gateway open-telemetry/opentelemetry-collector --version 0.173.1 -n observability --create-namespace -f deploy/observability/otel-gateway-values.yaml --wait
+```
+
+```bash
+helm install otel-agent open-telemetry/opentelemetry-collector --version 0.173.1 -n observability -f deploy/observability/otel-agent-values.yaml --wait
+```
+
+```bash
+kubectl apply -f deploy/observability/pipeline-alerts.yaml
 ```
 
 Port-forward Prometheus:

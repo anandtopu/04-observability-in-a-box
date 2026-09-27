@@ -265,3 +265,70 @@ One section per milestone, in the template from `docs/CLOUD_BUILD_PROMPT.md`. Nu
 2. It pairs orders' **client** span (`HTTP POST`, kind client) with inventory's **server** span (`POST /v1/reservations`, kind server) that has the client span as its parent. If inventory drops traces orders keeps, or vice versa, one half of each pair never reaches Tempo, and the edge vanishes or its counts become wrong. That's why sampling is parent-based (the child follows the parent's decision) and why tail sampling needs span metrics computed *before* sampling (§10).
 3. A render that silently kept `read`/`write`/`backend` at 3 replicas each would have created a SimpleScalable deployment beside the monolith on shared storage it doesn't support: 10 pods, far more RAM, and confusing write paths, discovered at runtime. A validation failure costs one minute at render time, with an explicit message.
 </details>
+
+## M4 — Gateway and agent Collectors   (2026-09-27, session 1, tier A)
+
+**Goal / requirement served:** FR-1 (apps send OTLP only to `otel-gateway.observability:4317`; a node agent collects stdout JSON logs), FR-3 end to end, FR-8 (the pipeline alerts on itself), ADR-P04-1 (one gateway owns destinations), ADR-P04-2 (logs via a node agent, not the logs SDK), NFR durability (gateway ×2 + PDB), NFR freshness (measured).
+
+**What we built:**
+- `deploy/observability/otel-gateway-values.yaml`: Collector contrib **0.161.0** (chart 0.173.1, whose appVersion is 0.160.0). Deployment ×2, PDB `minAvailable: 1`, 1 GiB limit with the chart's `memory_limiter` (80% limit, 25% spike), `k8s_attributes` (pod UID first, then connection IP), `resource` (`k8s.cluster.name`), and three exporters, each with `sending_queue: { batch: {} }` (no `batch` processor). ServiceMonitor on :8888. Only OTLP and metrics ports exposed.
+- `deploy/observability/otel-agent-values.yaml`: DaemonSet. `file_log` on `/var/log/pods/freightline_*/app/*.log` → `container` parser → `json_parser` (severity from `level`, trace/span IDs into the log record) → `memory_limiter` → `k8s_attributes` (pod UID association; pod label `app.kubernetes.io/name` → `service.name`) → `otlp_grpc` to the gateway.
+- `deploy/observability/pipeline-alerts.yaml`: PrometheusRule `telemetry-pipeline`. §8's four alerts with **corrected** expressions (D-20, D-21). `tests/pipeline-alerts.test.yaml` + `tests/promtool-rules.sh`: 7 promtool cases.
+- `tests/m4-pipeline.sh`: the spec's two gate queries, plus freshness, enrichment and self-metric checks.
+
+**How the data flows:**
+- **Metrics/traces:** SDK → gateway pod (Service load-balances per gRPC connection) → `memory_limiter` (refuses with `RESOURCE_EXHAUSTED` above ~819 MiB, and the SDK retries) → `k8s_attributes` (looks up the *source IP* in its pod cache, adds `k8s.namespace.name`, `k8s.pod.name`, `k8s.deployment.name`, …) → `resource` → exporter queue → Prometheus / Tempo.
+- **Logs:** the container runtime writes `<ts> stdout F {"level":"info",...,"trace_id":"…"}` under `/var/log/pods/freightline_<pod>_<uid>/app/0.log`.
+  1. The agent's `container` parser strips the CRI prefix and takes namespace, pod name and **pod UID** from the path.
+  2. `json_parser` turns the JSON into attributes, sets severity from `level`, and **moves `trace_id`/`span_id` into the log record's own TraceId/SpanId fields**.
+  3. `k8s_attributes` finds the pod *by UID*, not by IP: every log reaches the gateway from the agent's IP. It copies the pod label `app.kubernetes.io/name` into `service.name`.
+  4. OTLP → gateway (its `k8s_attributes` matches on the same UID) → `otlp_http/loki`.
+  5. Loki indexes `service_name` and keeps `trace_id`/`span_id` as structured metadata.
+- **Self-metrics:** each gateway serves `otelcol_*` on :8888 → ServiceMonitor → Prometheus → the `telemetry-pipeline` rules → Alertmanager (M2 routes).
+
+**Commands run, in order:**
+
+| Command | What it does | Key output |
+|---|---|---|
+| `helm pull open-telemetry/opentelemetry-collector --version 0.173.1` + read `_config.tpl` | How presets name components | `rewriteDeprecatedComponentNames: true` (default) → presets inject `k8s_attributes`, `file_log`, matching the spec |
+| `helm template` both + `otelcol-contrib validate` (0.161.0 image) | §7 config test on the *rendered* configs | both exit 0, no warnings |
+| `helm install otel-gateway …` then `otel-agent …` | Installs | **14 s**; 3 pods, 0 warn/error log lines |
+| `helm upgrade otel-gateway …` (ports) | Closes Jaeger/Zipkin Service ports | Service now `metrics:8888 otlp:4317 otlp-http:4318` |
+| `bash tests/m4-pipeline.sh` ×3 | End-to-end | **16/16 each run** (`docs/evidence/p04/m4-pipeline.txt`) |
+| `bash tests/promtool-rules.sh` | Rule check + unit tests | `SUCCESS: 4 rules found`, tests `SUCCESS` (`m4-alert-tests.txt`) |
+| `kubectl apply -f deploy/observability/pipeline-alerts.yaml` | Loads the alerts | 4 rules `inactive`, health `ok` |
+| `kubectl delete pod <orders>` (timed) | M0 open item | **10.8 s** (was 30 s without a gateway) (`m4-shutdown.txt`) |
+| `bash tests/m4-pipeline.sh idle-gate` after 5 idle minutes | The spec's gate | **orders 0, inventory 0** (`m4-gate-idle.txt`) |
+| Grafana port-forward + `/api/datasources/uid/*/health` | §6 verification | prometheus, tempo, loki all OK |
+
+**Verification:**
+- *Spec gate (probe filter):* `sum by (job) (rate(http_server_request_duration_seconds_count{job=~"freightline/.*"}[5m]))` → `freightline/orders 0`, `freightline/inventory 0` after more than 5 idle minutes, while kubelet counters show 3,118 readiness probes on inventory and 348 on orders. **PASS.**
+- *Spec gate (logs):* `{service_name="orders"} | trace_id != ""` → **1 stream** (`service_name=orders`, `k8s_namespace_name=freightline`, `k8s_pod_name=orders-…`, `trace_id`, `span_id`, `severity_text=info`). **PASS.**
+- *Beyond the gate (all measured, n=3):* for one uniquely identifiable order:
+  - the log line's structured-metadata `trace_id` equals the one inside its JSON body, and severity is parsed;
+  - its trace in Tempo contains both services;
+  - the gateway adds `k8s_namespace_name`/`k8s_pod_name` to metrics;
+  - both gateway replicas are scraped, the three exporters have sent 5,301 spans, 1,204 log records and 208 metric points, with 0 send failures and 0 refusals.
+  - **Freshness:** Loki **1.1 s** (NFR < 15 s); complete trace **4.8–5.3 s**; newest metric sample **1.4–10.9 s** old (NFR < 30 s).
+
+**What broke and how we fixed it:**
+1. *Chart default ports.* The gateway Service exposed Jaeger/Zipkin ports although those receivers were disabled. Closed them (D-19; §9 spoofing).
+2. *My freshness test reported "0.0 s".* The orders port-forward had died with the replaced pod, the POST returned nothing, and `|= ""` matched every line. **A test that can't fail isn't a test.** Fix: stop when there's no order ID. The numbers above come from runs after the fix.
+3. *The spec's self-metric names match nothing.* Collector 0.161 counters have no `_total` suffix, and `send_failed_*` series appear only after a first failure. The spec's §8 alerts would never fire. Fix: real names, plus a promtool case that proves the `_total` form stays silent (D-20).
+4. *Trace "freshness" stopped too early.* orders alone produces 6 spans, and inventory's arrive up to 5 s later (the Python `BatchSpanProcessor` schedule delay). Fix: wait for both services.
+5. *The idle gate first returned no orders series at all.* The orders pod had been replaced for the shutdown test and never served a request, and OTel histograms are exported only after their first measurement. Absence isn't zero. That also exposed a false-page bug in the spec's `OrdersMetricsAbsent` (a quiet-hours restart would page). Fix: alert on `target_info`, exported every 15 s regardless of traffic (D-21), with a promtool case for the restarted-idle-pod scenario. Gate re-run after one seed request and 5 idle minutes: 0/0.
+6. *Go exporter reconnect lag after the gateway appeared.* 2 failed exports right after install, then none. This is the M2/M3 DNS-backoff pattern; the gateway now has 2 replicas and a PDB, and its Service is never recreated.
+
+**Lab vs customer environment:** at Cobalt, the gateway is tier 1 on *their* nodes. They'll ask for the RBAC scope (read-only pods/namespaces/replicasets via a ClusterRole), the listening ports (4317/4318/8888 only), and what happens when the gateway is full: `memory_limiter` refuses, the SDKs retry and then drop, and `TelemetryRefused` tickets. The agent needs a hostPath read of `/var/log/pods`, which some platforms' PSA `restricted` forbids; it runs in `observability`, not `freightline`. At scale the agent should checkpoint file offsets (`file_storage`) so a restart neither loses nor re-sends logs, and the gateway needs HPA and a `load_balancing` tier if tail sampling (§10) arrives. Northstar is the same, with the Datadog exporter in M7.
+
+**Check yourself:**
+1. Why does the agent associate logs with pods by `k8s.pod.uid`, while the gateway uses UID *then* connection IP?
+2. `memory_limiter` is at 80% of 1 GiB. What happens to a span arriving when the gateway is at 850 MiB, and who notices?
+3. Why is "no series" not the same as "rate 0", and which two things in this milestone depended on that difference?
+
+<details><summary>answers</summary>
+
+1. Every log record reaches the gateway over the agent's connection, so the source IP identifies the *agent*, not the pod that wrote the line. The agent knows the real pod from the log file path, which the container parser turns into `k8s.pod.uid`, so association by UID is exact. Traces and metrics come straight from the app pods, whose source IP *is* the pod: the gateway first tries the UID (present on agent logs), then falls back to the connection IP (SDK traffic).
+2. The receiver refuses it (`RESOURCE_EXHAUSTED`), so nothing is accepted that the gateway can't hold. The SDK retries with backoff and eventually drops. `otelcol_receiver_refused_spans` increases, and `TelemetryRefused` raises a ticket. Memory falls as queues drain and GC runs, and the pod is never OOM-killed. That's backpressure instead of a crash that would lose everything in memory.
+3. `rate()` over a series with equal samples is 0: the thing exists and is idle. With no series, the query returns nothing: the thing never reported. The idle gate needed a pod that had served requests to show 0, and `OrdersMetricsAbsent` must watch a series that exists even with no traffic (`target_info`), or it pages on every quiet restart.
+</details>

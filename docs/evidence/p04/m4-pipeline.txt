@@ -1,0 +1,24 @@
+== spec M4 gate (logs): an orders log line carries a trace ID (one stream returned)
+$ curl -s -G localhost:3100/loki/api/v1/query_range --data-urlencode 'query={service_name="orders"} | trace_id != ""' --data-urlencode 'limit=1'
+{"status":"success","streams":1,"stream":{"service_name":"orders","k8s_namespace_name":"freightline","k8s_pod_name":"orders-579f6d467f-c28x7","trace_id":"9fde28dcbeeb9eb22382a8caa61e1aef","span_id":"b30ef0f91e861203","severity_text":"info"}}
+PASS  streams returned (1)
+== one request, followed through every backend (freshness = time until queryable)
+   order_id=210204d2-65df-4acb-8ce8-8c6d29c004b7
+PASS  Loki freshness (NFR < 15 s) (1.1s < 15s)
+PASS  trace_id lifted into structured metadata equals the one in the JSON body (8ec3d87dbb194a5da43ae0b59c3d4be1)
+PASS  severity parsed from the JSON level (info)
+PASS  service_name from the pod label (agent k8s_attributes) (orders)
+PASS  the log line's trace has both services (inventory,orders)
+PASS  Tempo freshness (complete trace queryable) (4.8s < 30s)
+PASS  metrics freshness: newest orders sample age (NFR < 30 s) (6.3s < 30s)
+== gateway enrichment on metrics (k8s_attributes -> promoted labels)
+PASS  k8s_namespace_name promoted (freightline)
+PASS  k8s_pod_name promoted (orders-579f6d467f-c28x7)
+== the pipeline's own metrics (gateway ServiceMonitor)
+PASS  gateway targets scraped (2 replicas) (2 >= 2)
+PASS  items sent by otlp_grpc/tempo (5322 >= 1)
+PASS  items sent by otlp_http/prometheus (254 >= 1)
+PASS  items sent by otlp_http/loki (1206 >= 1)
+PASS  send failures (all exporters) (0)
+PASS  refused by receivers (all signals) (0)
+== 16 passed, 0 failed

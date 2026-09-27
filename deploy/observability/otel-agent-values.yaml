@@ -1,0 +1,53 @@
+# otel-agent: the same Collector chart as a DaemonSet (spec section 5, M4; ADR-P04-2). One pipeline:
+# file_log -> memory_limiter -> k8s_attributes -> otlp_grpc to the gateway. Apps only print JSON to
+# stdout; this lifts trace_id/span_id out of each line so Loki can correlate logs with traces.
+#   helm install otel-agent open-telemetry/opentelemetry-collector --version 0.173.1 \
+#     -n observability -f deploy/observability/otel-agent-values.yaml
+mode: daemonset
+fullnameOverride: otel-agent
+image: { repository: otel/opentelemetry-collector-contrib, tag: "0.161.0" }
+command: { name: otelcol-contrib }
+resources:                            # lab sizing (not in the spec)
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { memory: 256Mi }
+presets:
+  logsCollection: { enabled: true }   # hostPath /var/log/pods + a file_log receiver we override below
+  kubernetesAttributes: { enabled: true }  # node-filtered watch + RBAC
+config:
+  receivers:
+    jaeger: null
+    zipkin: null
+    prometheus: null
+    otlp: null
+    file_log:
+      include: [/var/log/pods/freightline_*/app/*.log]   # only Freightline's app containers
+      operators:
+        - { type: container, id: container-parser }     # CRI line -> body; k8s.pod.uid etc. from the path
+        - type: json_parser
+          if: 'body matches "^\\{"'
+          parse_from: body
+          severity:
+            parse_from: attributes.level
+            mapping: { info: 30, warn: 40, error: 50, fatal: 60 }   # pino (Node) logs numeric levels
+          trace:
+            trace_id: { parse_from: attributes.trace_id }
+            span_id: { parse_from: attributes.span_id }
+  processors:
+    batch: null
+    k8s_attributes:
+      # Lab addition: file logs have no connection to associate by; the container parser put the
+      # pod UID on the resource, so match on that.
+      pod_association:
+        - sources: [{ from: resource_attribute, name: k8s.pod.uid }]
+      extract:
+        # service.name from the pod label: this becomes Loki's service_name (spec M4). Without it,
+        # Grafana's "logs for this span" is empty (spec section 12).
+        labels: [{ tag_name: service.name, key: app.kubernetes.io/name, from: pod }]
+  exporters:
+    debug: null
+    otlp_grpc: { endpoint: "otel-gateway.observability:4317", tls: { insecure: true }, sending_queue: { batch: {} } }
+  service:
+    pipelines:
+      logs: { receivers: [file_log], processors: [memory_limiter, k8s_attributes], exporters: [otlp_grpc] }
+      traces: null
+      metrics: null
