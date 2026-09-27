@@ -6,16 +6,18 @@ global:
   traceSampleRatio: "1.0"                              # lab; 0.1 at 100 req/s sustained
 
 # Rendered by the freightline-service library chart, one entry per service.
+# A map, not a list: Helm merges maps but replaces lists, so an overlay or
+# `--set services.inventory.env.DB_POOL_MAX=2` changes one service without restating the rest.
 services:
-  - name: orders
-    image: { repository: freightline/orders, tag: "0.1.3" }
+  orders:
+    image: { repository: freightline/orders, tag: "0.2.3" }
     replicas: 1
     resources: { cpu: 100m, memory: 128Mi }
     env:
       INVENTORY_URL: http://inventory:8080
       FAULT_5XX_RATE: "0"            # P03's fault hook; M6 burn tests raise it
-  - name: inventory
-    image: { repository: freightline/inventory, tag: "0.1.3" }
+  inventory:
+    image: { repository: freightline/inventory, tag: "0.2.3" }
     replicas: 1
     resources: { cpu: 100m, memory: 256Mi }
     env:

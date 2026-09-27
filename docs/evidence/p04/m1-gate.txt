@@ -1,0 +1,3 @@
+$ cd app && helm template freightline deploy/helm/freightline -f deploy/envs/kind/values.yaml | grep -c 'service.instance.id=$(POD_UID)'
+2
+(expected 2 for P04-lite: orders + inventory; the spec expects 4 for full Freightline, DEVIATIONS D-01a)

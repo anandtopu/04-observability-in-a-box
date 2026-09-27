@@ -16,6 +16,8 @@ import (
 	"github.com/exaring/otelpgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/anandtopu/04-observability-in-a-box/app/services/orders/internal/api"
 	"github.com/anandtopu/04-observability-in-a-box/app/services/orders/internal/telemetry"
@@ -63,9 +65,21 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// P02 state: every request, probes included, becomes a span and a histogram sample.
-	// M1 replaces this with a filtered handler (otelhttp.WithFilter).
-	srv := &http.Server{Addr: ":8080", Handler: otelhttp.NewHandler(mux, "orders"), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
+	// Kubelet probes are about 0.6 req/s of free "good" traffic per pod: they would inflate
+	// the availability SLO and keep idle rates above zero. Filtered requests are still served,
+	// but produce no span and no histogram sample (P04 M1).
+	notProbe := func(r *http.Request) bool { return r.URL.Path != "/healthz" && r.URL.Path != "/readyz" }
+	// Span names follow HTTP semconv ("POST /v1/orders"). otelhttp calls the formatter again
+	// after routing, when ServeMux has filled in r.Pattern; before that only the method is known.
+	spanName := func(_ string, r *http.Request) string {
+		if r.Pattern != "" {
+			return r.Pattern
+		}
+		return r.Method
+	}
+	apiHandler := otelhttp.NewHandler(routeLabel(mux), "orders",
+		otelhttp.WithFilter(notProbe), otelhttp.WithSpanNameFormatter(spanName))
+	srv := &http.Server{Addr: ":8080", Handler: apiHandler, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			log.Error("listen", "addr", srv.Addr, "err", err)
@@ -105,6 +119,23 @@ func main() {
 	pool.Close()
 	_ = shutdownOTel(shutdownCtx) // flush the last spans and metric points
 	log.Info("shutdown complete")
+}
+
+// routeLabel adds the matched route as http.route to the server span and to the duration
+// histogram. ServeMux writes the pattern into r.Pattern while routing, so it is known once the
+// handler returns. Bounded cardinality: a route template, never an order ID.
+func routeLabel(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r)
+		_, route, ok := strings.Cut(r.Pattern, " ")
+		if !ok {
+			return // no route matched (404)
+		}
+		trace.SpanFromContext(r.Context()).SetAttributes(attribute.String("http.route", route))
+		if l, found := otelhttp.LabelerFromContext(r.Context()); found {
+			l.Add(attribute.String("http.route", route))
+		}
+	})
 }
 
 func getenv(k, def string) string {

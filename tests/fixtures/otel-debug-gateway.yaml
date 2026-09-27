@@ -1,0 +1,67 @@
+# TEMPORARY test fixture (M1 runtime check), not part of the platform.
+# A single Collector that answers at the contract address otel-gateway.observability:4317
+# and prints everything it receives, so we can see resource attributes, filtered probes,
+# exemplars and bucket boundaries before any backend exists.
+# Delete it before M4 installs the real otel-gateway Helm release:
+#   kubectl delete -f tests/fixtures/otel-debug-gateway.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-debug-gateway
+  namespace: observability
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc: { endpoint: 0.0.0.0:4317 }
+    exporters:
+      debug:
+        verbosity: detailed   # every resource attribute, span, data point and exemplar
+    service:
+      pipelines:
+        traces: { receivers: [otlp], exporters: [debug] }
+        metrics: { receivers: [otlp], exporters: [debug] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-debug-gateway
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: otel-debug-gateway }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: otel-debug-gateway }
+    spec:
+      containers:
+        - name: otelcol
+          image: otel/opentelemetry-collector-contrib:0.161.0
+          imagePullPolicy: IfNotPresent
+          args: ["--config=/conf/config.yaml"]
+          ports:
+            - { name: otlp-grpc, containerPort: 4317 }
+          resources:
+            limits: { memory: 256Mi }
+          volumeMounts:
+            - { name: conf, mountPath: /conf }
+      volumes:
+        - name: conf
+          configMap: { name: otel-debug-gateway }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-gateway   # the P02/P04 contract address
+  namespace: observability
+spec:
+  selector: { app.kubernetes.io/name: otel-debug-gateway }
+  ports:
+    - { name: otlp-grpc, port: 4317, targetPort: otlp-grpc }

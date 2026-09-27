@@ -4,7 +4,7 @@ The image is CloudNativePG's operand image from ghcr.io: stock PostgreSQL binari
 no entrypoint, so the bootstrap below does what docker-entrypoint.sh would.
 */}}
 {{- $names := list }}
-{{- range .Values.services }}{{ $names = append $names .name }}{{ end }}
+{{- range $name, $_ := .Values.services }}{{ $names = append $names $name }}{{ end }}
 apiVersion: v1
 kind: Service
 metadata:

@@ -10,6 +10,8 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Response
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.utils import suppress_instrumentation
 from psycopg_pool import AsyncConnectionPool, PoolTimeout
 from pydantic import BaseModel, Field
 
@@ -75,6 +77,11 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="inventory", lifespan=lifespan)
+# Instrumented here, not by `opentelemetry-instrument` (the image sets
+# OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=fastapi), because exclude_spans has no env var.
+# The ASGI "http receive"/"http send" spans are half of this service's span volume and carry
+# nothing a responder needs. Probe URLs are still excluded via OTEL_PYTHON_FASTAPI_EXCLUDED_URLS.
+FastAPIInstrumentor.instrument_app(app, exclude_spans=["receive", "send"])
 
 
 class Reservation(BaseModel):
@@ -140,8 +147,11 @@ async def readyz(response: Response):
         response.status_code = 503
         return {"status": "not ready"}
     try:
-        async with pool.connection(timeout=1) as conn:
-            await conn.execute("SELECT 1")
+        # The HTTP span is already excluded (OTEL_PYTHON_FASTAPI_EXCLUDED_URLS), but psycopg
+        # would still trace this query as a root span every probe period (M1 finding).
+        with suppress_instrumentation():
+            async with pool.connection(timeout=1) as conn:
+                await conn.execute("SELECT 1")
     except Exception:
         response.status_code = 503
         return {"status": "not ready"}

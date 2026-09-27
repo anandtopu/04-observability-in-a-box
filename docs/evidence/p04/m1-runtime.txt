@@ -1,0 +1,30 @@
+window 2026-09-27T18:33:23 .. 9999
+1. service.instance.id per pod (service, id, pod_template_hash, version):
+     inventory ea64eab8-fbe2-4be9-88d3-840a023a7926 96c54799 0.2.2
+     orders 2970bc45-97a9-4eae-968b-0f2aa489b0e3 5774fd6997 0.2.3
+     orders 99881ea2-90ba-48d2-b7de-5d0151b87d52 5774fd6997 0.2.3
+2. spans by service and name:
+        601  inventory  INSERT
+        601  inventory  POST /v1/reservations
+        601  inventory  UPDATE
+        601  orders     HTTP POST
+        601  orders     POST /v1/orders
+       1202  orders     pool.acquire
+          2  orders     prepare
+          2  orders     prepare UPDATE orders SET status = $2 WHERE id = $1
+        601  orders     query
+        601  orders     query UPDATE orders SET status = $2 WHERE id = $1
+   probe spans (/healthz, /readyz): 0
+3. traces: 601, of which 601 contain spans from both orders and inventory
+4. exemplars on http.server.request.duration: {'inventory': 7, 'orders': 10}
+   http.route values on the duration histogram: ['/v1/orders', '/v1/reservations']
+5. bucket boundaries (s): 0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10
+    pod inventory-96c54799-tjm5k uid ea64eab8-fbe2-4be9-88d3-840a023a7926
+    pod orders-5774fd6997-l4gjj uid 99881ea2-90ba-48d2-b7de-5d0151b87d52
+    pod orders-5774fd6997-znptt uid 2970bc45-97a9-4eae-968b-0f2aa489b0e3
+
+=== idle window on final images (orders 0.2.3 x2, inventory 0.2.2; only kubelet probes running) ===
+window 2026-09-27T18:34:40 .. 9999
+2. spans by service and name:
+   probe spans (/healthz, /readyz): 0
+3. traces: 0, of which 0 contain spans from both orders and inventory

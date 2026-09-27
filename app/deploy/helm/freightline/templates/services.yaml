@@ -1,5 +1,5 @@
 {{- /* One Deployment + Service + PDB per service, all from the library chart. */}}
-{{- range $svc := .Values.services }}
+{{- range $name, $svc := .Values.services }}
 ---
-{{ include "freightline-service.all" (dict "root" $ "svc" $svc) }}
+{{ include "freightline-service.all" (dict "root" $ "svc" (merge (dict "name" $name) $svc)) }}
 {{- end }}

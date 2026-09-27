@@ -16,9 +16,16 @@ M0=(
   ghcr.io/axllent/mailpit:v1.31
 )
 
+# M1 uses the Collector image for a temporary debug gateway; M4 runs it for real.
+M1=(
+  otel/opentelemetry-collector-contrib:0.161.0
+  grafana/k6:2.3.0          # in-cluster load (load/k6-job.yaml)
+)
+
 case "${1:-all}" in
   m0) IMAGES=("${M0[@]}") ;;
-  all) IMAGES=("${M0[@]}") ;;
+  m1) IMAGES=("${M1[@]}") ;;
+  all) IMAGES=("${M0[@]}" "${M1[@]}") ;;
   *) echo "unknown set: $1" >&2; exit 2 ;;
 esac
 

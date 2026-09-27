@@ -15,7 +15,9 @@ RUN --mount=type=secret,id=ca,required=false \
     if [ -s /run/secrets/ca ]; then export SSL_CERT_FILE=/run/secrets/ca; fi; \
     uv sync --frozen --no-dev
 ENV PATH=/app/.venv/bin:$PATH
+# FastAPI is instrumented in code (exclude_spans); everything else stays zero-code.
+ENV OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=fastapi
 USER 10001:10001
 EXPOSE 8080
-# The wrapper instruments FastAPI and psycopg from the OTEL_* environment before import.
+# The wrapper instruments psycopg (and sets up the SDK) from the OTEL_* environment before import.
 CMD ["opentelemetry-instrument", "python", "-m", "inventory"]

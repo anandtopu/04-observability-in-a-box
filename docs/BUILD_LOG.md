@@ -74,3 +74,67 @@ One section per milestone, in the template from `docs/CLOUD_BUILD_PROMPT.md`. Nu
 2. Kubernetes sends SIGTERM, which Postgres treats as a *smart* shutdown: refuse new sessions and wait for existing ones to end. Connection pools never end their sessions, so Postgres waited the whole 30 s grace period and was SIGKILLed, rejecting new connections the whole time. `-m fast` rolls back open transactions, disconnects clients and checkpoints, so the pod stops in about 1 s and clients reconnect to the new pod.
 3. The SDK exports asynchronously on a background batcher and drops data after retries, so request handling never waits on telemetry. The cost shows at shutdown: the final flush waits up to its deadline (20 s here) for a gateway that doesn't exist. That's why the gateway becomes tier 1 in M4 (replicas, PDB), and why the flush deadline must fit inside `terminationGracePeriodSeconds`.
 </details>
+
+## M1 — Instrumentation hygiene   (2026-09-27, session 1, tier A)
+
+**Goal / requirement served:** spec §5 M1, and the first row of §12 (no `service.instance.id` → counters "reset", `rate()` spikes). It prepares FR-2 (`freightline.pod_template_hash` for P03), FR-4 (exemplars) and M6's SLO arithmetic (no free probe traffic, a 0.25 s bucket).
+
+**What we built:**
+- `app/deploy/helm/freightline-service/templates/_helpers.tpl`: `POD_UID` and `POD_TEMPLATE_HASH` from the downward API, **declared first** because Kubernetes expands `$(VAR)` only from earlier entries. `OTEL_RESOURCE_ATTRIBUTES` gains `service.instance.id=$(POD_UID),freightline.pod_template_hash=$(POD_TEMPLATE_HASH)`. Also `OTEL_METRICS_EXEMPLAR_FILTER=trace_based` and `OTEL_PYTHON_FASTAPI_EXCLUDED_URLS=healthz,readyz`.
+- `app/services/orders/cmd/orders/main.go`: `otelhttp.WithFilter(notProbe)` (the spec's snippet), `WithSpanNameFormatter` returning `r.Pattern`, and a `routeLabel` middleware that adds `http.route` to the span and the duration histogram.
+- `app/services/inventory/src/inventory/main.py`: `suppress_instrumentation()` around the readiness query, and `FastAPIInstrumentor.instrument_app(app, exclude_spans=["receive","send"])`. `Dockerfile`: `OTEL_PYTHON_DISABLED_INSTRUMENTATIONS=fastapi`, so FastAPI isn't instrumented twice.
+- `app/deploy/helm/freightline/`: `services` is now a map keyed by name (DEVIATIONS D-11). Images are `0.2.3`.
+- `tests/fixtures/otel-debug-gateway.yaml` (temporary; deleted after use) and `tests/m1-debug-analyse.py`: the runtime check. `load/k6-job.yaml`: in-cluster k6, so traffic goes through the Service to every replica.
+- `scripts/kind-load-images.sh`: M1 list (`otel/opentelemetry-collector-contrib:0.161.0`, `grafana/k6:2.3.0`).
+
+**How the data flows (what changed on the way through):**
+- The kubelet starts a pod and writes its UID and `pod-template-hash` label into env vars. The SDK reads `OTEL_RESOURCE_ATTRIBUTES` once at start-up, so **every span and metric point from that pod carries its own `service.instance.id`**. In M2 Prometheus turns it into the `instance` label, so two replicas become two series instead of one flip-flopping series.
+- A kubelet probe hits `/readyz`. In Go, `otelhttp`'s filter returns false, so there's no span and no histogram sample. In Python the URL is excluded by env, and the DB query inside the handler runs under `suppress_instrumentation()`, so no psycopg span either.
+- A real `POST /v1/orders` starts a server span. After ServeMux routes it, otelhttp renames the span from `r.Pattern` (`POST /v1/orders`), and `routeLabel` adds `http.route=/v1/orders` to the histogram labels.
+- The request's duration lands in a bucket (the boundaries include **0.25 s**, which M6 needs), and since the span is sampled, the bucket keeps an **exemplar** with that span's trace and span IDs. In M5, that's the click from a latency spike to its trace.
+- orders calls inventory with `traceparent`, so both services' spans share one trace ID, and inventory emits 3 spans per request instead of 6.
+
+**Commands run, in order:**
+
+| Command | What it does | Key output |
+|---|---|---|
+| `helm template freightline deploy/helm/freightline -f deploy/envs/kind/values.yaml \| grep -c 'service.instance.id=$(POD_UID)'` (from `app/`) | The spec's gate | **`2`** (P04-lite; the spec expects 4 for full Freightline) |
+| `helm upgrade … --wait` | Rolls out the new env and images | Revisions 5–12 (see "What broke") |
+| `kubectl apply -f tests/fixtures/otel-debug-gateway.yaml` | A Collector at the contract address that prints everything | 0.161.0 starts with no deprecation warnings |
+| `kubectl apply -f load/k6-job.yaml` | 10 req/s × 60 s through the Service, orders × 2 | 601 requests, 0.00% failed, p99 **15.4 ms** (final run) |
+| `python3 tests/m1-debug-analyse.py --since …` | Reads the Collector's logs from the node and checks every property | See Verification |
+| `kubectl delete -f tests/fixtures/otel-debug-gateway.yaml` | Removes the fixture so M4's Helm release starts clean | deleted |
+| `bash tests/m0-smoke.sh` | M0 regression | 13 passed, 0 failed |
+
+**Verification:**
+- *Spec gate (render):* `2`. Evidence: `docs/evidence/p04/m1-gate.txt`.
+- *Runtime check (an addition, labelled as such):* `docs/evidence/p04/m1-runtime.txt`, orders × 2 plus inventory, final images.
+  - 3 distinct `service.instance.id`s, each **equal to its pod UID**; `freightline.pod_template_hash` equals the ReplicaSet hash.
+  - Under load: **601 traces for 601 requests, 601/601 containing spans from both services**; **0 probe spans**.
+  - Idle on final images: **0 spans in about 77 s** with probes running on all 3 pods.
+  - Exemplars on `http.server.request.duration`: 10 (orders) and 7 (inventory) in one export window. `http.route` values: `/v1/orders`, `/v1/reservations`.
+  - Bucket boundaries: 0.005 … **0.25** … 10 s.
+
+**What broke and how we fixed it:**
+1. *Probe exclusion looked done but wasn't.* In a 75 s idle window: 40 spans, 0 of them HTTP. Grouping by scope showed 39 `SELECT` spans from psycopg: inventory's `/readyz` runs `SELECT 1`, and with the HTTP span excluded, each query became its own root span. The spec's gate (and M4's idle-rate gate) can't see this, because it doesn't affect the HTTP histogram. Fix: `suppress_instrumentation()`. Result: 0 spans idle.
+2. *"0 spans under load"* contradicted 601 requests and the trace IDs in the exemplars. Hypothesis: data lost somewhere between the SDK and the log. Evidence: the Collector's log started at 18:26, after the load; `detailed` output crossed the kubelet's **10 MiB rotation** and `kubectl logs` shows only the current file. The rotated file held 36 trace batches from 18:25. Fix: the analyser reads every rotation from the node, and **gunzips** older ones (the next failure: `UnicodeDecodeError … 0x8b`, the gzip magic number). M4's agent faces the same rotation.
+3. *Span names were all `orders`.* My first fix (`span.SetName` after routing) did nothing. otelhttp's own source (`handler.go:180`) re-applies its span-name formatter after the handler returns whenever `r.Pattern` is set, and the default formatter returns the operation name. Fix: `otelhttp.WithSpanNameFormatter`, which otelhttp calls both before and after routing.
+4. *inventory's 3 ASGI `http send/receive` spans per request* were half of its span volume. `exclude_spans` exists only as a code parameter, so FastAPI is instrumented in code and disabled in the auto-instrumentor.
+5. *`--set services[0].replicas=2` broke the render.* Helm **replaces lists**: the override became the whole list `[{replicas: 2}]`, with no name and no image. Fix: `services` becomes a map (D-11), so `--set services.orders.replicas=2` merges.
+6. *Helm 4 refused the upgrade: `conflict with "kubectl" with subresource "scale": .spec.replicas`.* Helm 4 uses **server-side apply**, and my earlier `kubectl scale` had made kubectl a field owner. `--force-conflicts` at the *same* value (2) only made the field **co-owned**, so the conflict returned when the value changed to 1. Forcing at a different value made Helm the sole owner, verified with `kubectl get … --show-managed-fields` (which `-o json` hides by default): `spec.replicas owned by: helm (Apply)`. Rule: never `kubectl scale` a Helm-managed workload; use values.
+7. *A failed `helm upgrade` still changed the cluster.* Revision 6 is `failed`, but it had already rolled inventory. Helm 4 applies objects one by one, so "failed" doesn't mean "nothing changed". Check `helm history` and the pods.
+8. *postgres-0 restarted during the map conversion.* Sorted map keys reordered the bootstrap script, which changed the StatefulSet's pod template. It was harmless (`initdb` skipped; fast stop), but review the rendered diff before changing a database chart.
+
+**Lab vs customer environment:** at Cobalt, pod UIDs work the same, but the customer's SOC sees `service.instance.id` in every Splunk event, so confirm it's acceptable to them (it's a random UID with no personal data). Probe paths may differ per platform, for example a service mesh adding its own health endpoints, so review the filter list during onboarding. Cobalt's CAB approves configuration, not code: the span-name and exclusion fixes are code, so they ship in the one image everyone runs, never per customer.
+
+**Check yourself:**
+1. What exactly goes wrong in Prometheus if two replicas push `http_server_request_duration_seconds_count` without `service.instance.id`?
+2. We excluded `/readyz` from HTTP instrumentation, yet it still produced spans. Why, and why couldn't the spec's gate or M4's idle-rate gate catch it?
+3. Why did `--set services[0].replicas=2` break the chart, and what does the same rule mean for M7's customer overlay?
+
+<details><summary>answers</summary>
+
+1. Both replicas produce the same label set (`job="freightline/orders"`, same `instance`), so they write to *one* series. Their cumulative counters interleave (replica A at 5000, B at 3100, A at 5010, …), and Prometheus reads every drop as a counter reset. `rate()` then adds the "reset" jumps and spikes, and samples arriving out of order are rejected. With `service.instance.id`, each replica is its own `instance` series, and `sum by (job)` adds them correctly.
+2. The exclusion removes only the HTTP **server span**. The handler still runs `SELECT 1`, and psycopg's instrumentation traces it. With no parent span in context, it becomes a **root span** on every probe. The spec's gate checks only the rendered chart, and M4's gate checks the HTTP request-rate metric, which really is 0; neither looks at trace volume. Only looking at what a Collector actually receives shows it, which is why we inspect before trusting.
+3. Helm merges **maps** key by key but **replaces lists** whole, so `services[0].replicas=2` produced a new list with a single element that has no name or image. For M7, the Cobalt overlay has to restate any list it touches in full, for example `service.pipelines.logs.processors` and `exporters`. If it names only the new exporter, the Loki exporter silently disappears. That's why the spec's overlay lists both `otlp_http/loki` and `splunk_hec/cobalt`.
+</details>

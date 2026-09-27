@@ -1,0 +1,49 @@
+# In-cluster k6 run: traffic goes through the orders Service, so every replica gets load
+# (a port-forward pins a single pod) and there is no port-forward bottleneck at 100 req/s.
+# The script comes from a ConfigMap built from load/steady.js:
+#   kubectl -n freightline create configmap k6-steady --from-file=load/steady.js --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl -n freightline delete job k6-steady --ignore-not-found && kubectl apply -f load/k6-job.yaml
+# Change RATE / DURATION below (or with kubectl set env) per run.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-steady
+  namespace: freightline
+  labels: { app.kubernetes.io/name: k6, app.kubernetes.io/part-of: freightline-load }
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: k6 }
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:                       # the namespace enforces PSA "restricted"
+        runAsNonRoot: true
+        runAsUser: 12345
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: k6
+          image: grafana/k6:2.3.0
+          imagePullPolicy: IfNotPresent
+          args: ["run", "--quiet", "/scripts/steady.js"]
+          env:
+            - { name: BASE_URL, value: "http://orders.freightline:8080" }
+            - { name: RATE, value: "10" }
+            - { name: DURATION, value: "60s" }
+          resources:
+            requests: { cpu: 100m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: scripts, mountPath: /scripts }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - name: scripts
+          configMap: { name: k6-steady }
+        - name: tmp
+          emptyDir: {}
