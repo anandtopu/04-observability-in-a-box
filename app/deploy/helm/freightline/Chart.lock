@@ -1,0 +1,6 @@
+dependencies:
+- name: freightline-service
+  repository: file://../freightline-service
+  version: 0.1.0
+digest: sha256:20e1c06b336a78225c35e60c59ad7d8e1595af82b8ef5f8447d039108846065a
+generated: "2026-09-27T17:56:56.645708527Z"

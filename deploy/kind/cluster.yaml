@@ -1,0 +1,26 @@
+# kind cluster for P04 (Tier A). Create with:
+#   kind create cluster --config deploy/kind/cluster.yaml
+# One node keeps the footprint inside the cloud VM (4 CPU / 15 GB); every P04 gate
+# (DaemonSet agent, PDB, downward API) still works on a single node.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: freightline
+# The cloud VM drops CAP_SYS_RESOURCE from every process's bounding set, so nothing can
+# lower /proc/<pid>/oom_score_adj. runc then fails every pod sandbox ("failed to update
+# /proc/self/oom_score_adj: Permission denied"), because the kubelet asks for -998 on
+# control-plane pods. This makes containerd clamp the request to the current score
+# instead of failing (see DEVIATIONS D-04). Laptops and real clusters do not need it.
+containerdConfigPatches:
+  - |
+    [plugins."io.containerd.grpc.v1.cri"]
+      restrict_oom_score_adj = true
+nodes:
+  - role: control-plane
+    # kind v0.33.0 defaults to v1.37.0; the build prompt pins 1.36.4.
+    image: kindest/node:v1.36.4
+    kubeadmConfigPatches:
+      # The cloud VM's Docker runs on cgroup v1. Since Kubernetes 1.35 the kubelet
+      # refuses to start on cgroup v1 unless failCgroupV1 is false (see DEVIATIONS D-03).
+      - |
+        kind: KubeletConfiguration
+        failCgroupV1: false

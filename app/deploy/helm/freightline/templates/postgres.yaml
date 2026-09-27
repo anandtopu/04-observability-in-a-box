@@ -1,0 +1,100 @@
+{{- /*
+One Postgres for every P04-lite service (P02 runs one per service; see DEVIATIONS D-01).
+The image is CloudNativePG's operand image from ghcr.io: stock PostgreSQL binaries, uid 26,
+no entrypoint, so the bootstrap below does what docker-entrypoint.sh would.
+*/}}
+{{- $names := list }}
+{{- range .Values.services }}{{ $names = append $names .name }}{{ end }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels: { app.kubernetes.io/name: postgres, app.kubernetes.io/part-of: freightline }
+spec:
+  selector: { app.kubernetes.io/name: postgres }
+  ports:
+    - { name: postgres, port: 5432, targetPort: postgres }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels: { app.kubernetes.io/name: postgres, app.kubernetes.io/part-of: freightline }
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: postgres }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: postgres, app.kubernetes.io/part-of: freightline }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 26
+        runAsGroup: 26
+        fsGroup: 26
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: postgres
+          image: "{{ .Values.postgres.image }}"
+          imagePullPolicy: IfNotPresent
+          command: ["bash", "-ec"]
+          args:
+            - |
+              export PGDATA=/var/lib/postgresql/data/pgdata
+              if [ ! -s "$PGDATA/PG_VERSION" ]; then
+                initdb -D "$PGDATA" -U postgres --pwfile=<(printf '%s' "$PW_postgres") \
+                  --auth-local=trust --auth-host=scram-sha-256 --encoding=UTF8
+                echo "host all all 0.0.0.0/0 scram-sha-256" >> "$PGDATA/pg_hba.conf"
+                # Single-user mode: one statement per line, no server or socket needed yet.
+                postgres --single -D "$PGDATA" postgres <<SQL
+              {{- range $names }}
+              CREATE ROLE {{ . }} LOGIN PASSWORD '${PW_{{ . }}}';
+              CREATE DATABASE {{ . }} OWNER {{ . }};
+              {{- end }}
+              SQL
+              fi
+              exec postgres -D "$PGDATA" -c listen_addresses='*' \
+                -c max_connections={{ .Values.postgres.maxConnections }} \
+                -c shared_buffers={{ .Values.postgres.sharedBuffers }}
+          env:
+            {{- range (prepend $names "postgres") }}
+            - name: PW_{{ . }}
+              valueFrom: { secretKeyRef: { name: postgres-credentials, key: {{ . }} } }
+            {{- end }}
+          lifecycle:
+            preStop:
+              # SIGTERM means "smart" shutdown: Postgres waits for every client to leave, and
+              # pooled clients never do, so it refuses new connections until SIGKILL. A fast
+              # shutdown disconnects clients and stops cleanly in about a second.
+              exec: { command: ["pg_ctl", "stop", "-m", "fast", "-D", "/var/lib/postgresql/data/pgdata"] }
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"] }
+            periodSeconds: 5
+          livenessProbe:
+            exec: { command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"] }
+            periodSeconds: 10
+            failureThreshold: 6
+          resources:
+            requests: { cpu: {{ .Values.postgres.resources.cpu }}, memory: {{ .Values.postgres.resources.memory }} }
+            limits: { memory: {{ .Values.postgres.resources.memory }} }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: run, mountPath: /var/run/postgresql }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: run, emptyDir: {} }
+        - { name: tmp, emptyDir: {} }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: {{ .Values.postgres.storage }} } }

@@ -1,0 +1,14 @@
+    http_req_duration{name:POST /v1/orders}
+    ✓ 'p(99)<300' p(99)=29.43ms
+    http_req_failed
+    ✓ 'rate<0.01' rate=0.00%
+    checks_total.......: 1202    40.049611/s
+    checks_succeeded...: 100.00% 1202 out of 1202
+    checks_failed......: 0.00%   0 out of 1202
+    ✓ 202 accepted
+    ✓ has Location
+    http_req_duration..............: avg=10.79ms min=7.65ms med=10.2ms  max=56.54ms p(90)=12.15ms p(95)=13.62ms
+    http_req_failed................: 0.00%  0 out of 601
+    http_reqs......................: 601    20.024806/s
+CONFIRMED|596
+REJECTED|7

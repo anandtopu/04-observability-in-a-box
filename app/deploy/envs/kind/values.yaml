@@ -1,0 +1,10 @@
+# kind, low-RAM profile (P02): one replica each, small Postgres. The cloud VM has 4 CPU / 15 GB
+# and P04's backends need most of it.
+global:
+  environment: kind
+
+postgres:
+  storage: 1Gi
+  maxConnections: 50
+  sharedBuffers: 64MB
+  resources: { cpu: 50m, memory: 256Mi }

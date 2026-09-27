@@ -1,0 +1,5 @@
+apiVersion: v2
+name: freightline-service
+description: Library chart that renders every Freightline service identically (Deployment, Service, PDB)
+type: library
+version: 0.1.0

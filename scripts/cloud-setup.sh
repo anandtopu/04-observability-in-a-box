@@ -58,6 +58,12 @@ if ! have kubeconform; then tmp=$(mktemp -d); fetch "https://github.com/yannh/ku
 for t in k6 sloth kubeconform; do have $t && echo "$t: ok" || warn "$t missing"; done
 
 log "Container runtime"
+# The VM restarts when its network settings change, and nothing restarts dockerd (BUILD_LOG M0).
+if have dockerd && ! docker info >/dev/null 2>&1; then
+  nohup dockerd >/tmp/dockerd.log 2>&1 &
+  echo "started dockerd (PID $!, log /tmp/dockerd.log)"
+  for _ in $(seq 30); do docker info >/dev/null 2>&1 && break; sleep 1; done
+fi
 if have docker && docker info >/dev/null 2>&1; then
   docker version --format 'docker client {{.Client.Version}} / server {{.Server.Version}}'
   docker compose version || warn "docker compose plugin missing"
@@ -69,5 +75,11 @@ log "Registry reachability (these hosts P04 pulls from)"
 for u in https://registry-1.docker.io/v2/ https://quay.io/v2/ https://registry.k8s.io/v2/ https://ghcr.io/v2/ https://prometheus-community.github.io/helm-charts/index.yaml https://open-telemetry.github.io/opentelemetry-helm-charts/index.yaml; do
   code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$u"); case "$code" in 2*|401) echo "OK   $u ($code)";; *) warn "BLOCKED/ERR $u ($code)";; esac
 done
+
+# A /v2/ probe cannot see Docker Hub's anonymous pull quota, which every session behind the
+# same egress IP shares (DEVIATIONS D-05). 0 remaining means docker.io pulls fail with 429.
+tok=$(curl -s --max-time 10 "https://auth.docker.io/token?service=registry.docker.io&scope=repository:ratelimitpreview/test:pull" | jq -r .token 2>/dev/null)
+rem=$(curl -s --max-time 10 --head -H "Authorization: Bearer $tok" https://registry-1.docker.io/v2/ratelimitpreview/test/manifests/latest | awk -F': ' 'tolower($1)=="ratelimit-remaining"{print $2}' | tr -d '\r')
+echo "Docker Hub anonymous pulls remaining: ${rem:-unknown}"
 
 log "Done. Next: decide the tier (A kind / B compose / C render-only) per CLAUDE.md."

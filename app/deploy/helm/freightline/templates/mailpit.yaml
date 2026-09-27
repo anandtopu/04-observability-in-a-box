@@ -1,0 +1,51 @@
+{{- /* Mailpit: the lab's SMTP sink. Alertmanager's page and ticket routes (M2/M6) land here. */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailpit
+  labels: { app.kubernetes.io/name: mailpit, app.kubernetes.io/part-of: freightline }
+spec:
+  selector: { app.kubernetes.io/name: mailpit }
+  ports:
+    - { name: smtp, port: 1025, targetPort: smtp }
+    - { name: ui, port: 8025, targetPort: ui }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mailpit
+  labels: { app.kubernetes.io/name: mailpit, app.kubernetes.io/part-of: freightline }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: mailpit }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: mailpit, app.kubernetes.io/part-of: freightline }
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000   # the image defaults to root; Mailpit needs no privileges
+        runAsGroup: 1000
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: mailpit
+          image: "{{ .Values.mailpit.image }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: smtp, containerPort: 1025 }
+            - { name: ui, containerPort: 8025 }
+          readinessProbe:
+            httpGet: { path: /readyz, port: ui }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        - { name: tmp, emptyDir: {} }

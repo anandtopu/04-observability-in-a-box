@@ -1,0 +1,9 @@
+# Namespaces the app needs before `helm install`. Freightline runs under PSA "restricted"
+# (P02 trust boundary), so any pod that asks for privileges is rejected at admission.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: freightline
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/warn: restricted

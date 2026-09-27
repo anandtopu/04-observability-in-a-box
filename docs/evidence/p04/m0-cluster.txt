@@ -1,0 +1,38 @@
+# M0 cluster evidence (2026-09-27T18:07:09Z)
+$ kubectl get nodes -o wide
+NAME                        STATUS   ROLES           AGE   VERSION   INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                       KERNEL-VERSION           CONTAINER-RUNTIME
+freightline-control-plane   Ready    control-plane   17m   v1.36.4   172.18.0.2    <none>        Debian GNU/Linux 13 (trixie)   6.18.44-fc-v37 (amd64)   containerd://2.3.4
+
+$ kubectl -n freightline get pods,svc,pdb,networkpolicy
+NAME                             READY   STATUS    RESTARTS   AGE
+pod/inventory-55b9f4dd5b-h684j   1/1     Running   0          3m38s
+pod/mailpit-586984d894-m5sb4     1/1     Running   0          9m42s
+pod/orders-66fbbdd989-8jxk5      1/1     Running   0          2m57s
+pod/postgres-0                   1/1     Running   0          3m38s
+
+NAME                TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)             AGE
+service/inventory   ClusterIP   10.96.42.126    <none>        8080/TCP            9m42s
+service/mailpit     ClusterIP   10.96.232.5     <none>        1025/TCP,8025/TCP   9m42s
+service/orders      ClusterIP   10.96.196.36    <none>        8080/TCP            9m42s
+service/postgres    ClusterIP   10.96.246.219   <none>        5432/TCP            9m42s
+
+NAME                                   MIN AVAILABLE   MAX UNAVAILABLE   ALLOWED DISRUPTIONS   AGE
+poddisruptionbudget.policy/inventory   N/A             1                 1                     9m42s
+poddisruptionbudget.policy/orders      N/A             1                 1                     9m42s
+
+NAME                                                   POD-SELECTOR   AGE
+networkpolicy.networking.k8s.io/allow-same-namespace   <none>         9m42s
+networkpolicy.networking.k8s.io/default-deny-ingress   <none>         9m42s
+
+$ docker info (cgroup)
+CgroupVersion=1 CgroupDriver=cgroupfs
+
+$ grep CapBnd /proc/self/status   (bit 24 = CAP_SYS_RESOURCE is cleared)
+CapBnd:	000001fffeffffff
+
+$ helm -n freightline history freightline
+REVISION	UPDATED                 	STATUS    	CHART            	APP VERSION	DESCRIPTION     
+1       	Sun Sep 27 17:57:27 2026	superseded	freightline-0.1.0	0.1.0      	Install complete
+2       	Sun Sep 27 17:58:26 2026	superseded	freightline-0.1.0	0.1.0      	Upgrade complete
+3       	Sun Sep 27 17:59:59 2026	superseded	freightline-0.1.0	0.1.0      	Upgrade complete
+4       	Sun Sep 27 18:03:12 2026	deployed  	freightline-0.1.0	0.1.0      	Upgrade complete

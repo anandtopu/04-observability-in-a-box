@@ -1,0 +1,23 @@
+{{- /*
+Default-deny ingress for the namespace, then explicit allows (P02 M8). Egress stays open:
+services must reach otel-gateway.observability:4317 and DNS. Later milestones add allows,
+e.g. Alertmanager -> Mailpit :1025 (spec section 12 "NetworkPolicy" failure point).
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-same-namespace
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}

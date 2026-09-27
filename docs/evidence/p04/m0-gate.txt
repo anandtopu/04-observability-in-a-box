@@ -1,0 +1,18 @@
+== readiness
+PASS  orders /readyz (200)
+PASS  inventory /readyz (200)
+PASS  mailpit /readyz (200)
+PASS  postgres pg_isready (0)
+== POST /v1/orders
+PASS  status code (202)
+PASS  Location header (/v1/orders/d7afc22e-15c4-405a-933f-2455d989bde7)
+PASS  order confirmed by inventory (CONFIRMED)
+PASS  replay returns the same order (d7afc22e-15c4-405a-933f-2455d989bde7)
+PASS  GET /v1/orders/{id} (200)
+PASS  missing Idempotency-Key (400)
+PASS  out-of-stock order rejected (REJECTED)
+== trace context crosses Go -> Python
+PASS  orders log line has a trace_id (32)
+PASS  inventory logged the same trace_id (stock reserved)
+   trace_id=807087f07c7f3ef1550661966b83a9ea order_id=d7afc22e-15c4-405a-933f-2455d989bde7
+== 13 passed, 0 failed

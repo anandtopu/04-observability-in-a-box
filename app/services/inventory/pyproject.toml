@@ -1,0 +1,20 @@
+[project]
+name = "inventory"
+version = "0.1.0"
+description = "P04-lite stand-in for Freightline's Python inventory service"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "psycopg[binary]",
+    "psycopg-pool",
+    # Zero-code instrumentation: `opentelemetry-instrument` reads the OTEL_* env contract.
+    "opentelemetry-distro",
+    "opentelemetry-exporter-otlp-proto-grpc",
+    "opentelemetry-instrumentation-fastapi",
+    "opentelemetry-instrumentation-psycopg",
+]
+
+[build-system]
+requires = ["uv_build"]
+build-backend = "uv_build"

@@ -1,0 +1,10 @@
+apiVersion: v2
+name: freightline
+description: P04-lite Freightline (orders in Go, inventory in Python, one Postgres, Mailpit)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+dependencies:
+  - name: freightline-service
+    version: 0.1.0
+    repository: file://../freightline-service
