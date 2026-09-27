@@ -6,7 +6,7 @@ A learning build from the FDE Onboarding Handbook: Beacon's standard observabili
 - dashboards and SLO burn-rate alerts as code;
 - a customer-export overlay for Splunk or Datadog behind a TLS-inspecting proxy.
 
-**Status:** M0–M2 done (Tier A kind, P04-lite app, instrumentation hygiene, Prometheus with the OTLP receiver). Progress: [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md); departures from the spec: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md). The build is done in **Claude Code cloud sessions**, following [`docs/CLOUD_BUILD_PROMPT.md`](docs/CLOUD_BUILD_PROMPT.md).
+**Status:** M0–M3 done (Tier A kind, P04-lite app, instrumentation hygiene, Prometheus with the OTLP receiver, Tempo and Loki). Progress: [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md); departures from the spec: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md). The build is done in **Claude Code cloud sessions**, following [`docs/CLOUD_BUILD_PROMPT.md`](docs/CLOUD_BUILD_PROMPT.md).
 
 | Path | What it is |
 |---|---|
@@ -74,6 +74,16 @@ helm repo add prometheus-community https://prometheus-community.github.io/helm-c
 
 ```bash
 helm install kps prometheus-community/kube-prometheus-stack --version 91.5.1 -n monitoring --create-namespace -f deploy/observability/kps-values.yaml --wait
+```
+
+Install Tempo and Loki (grafana-community OCI charts on ghcr.io):
+
+```bash
+helm install tempo oci://ghcr.io/grafana-community/helm-charts/tempo --version 3.0.0 -n monitoring -f deploy/observability/tempo-values.yaml --wait
+```
+
+```bash
+helm install loki oci://ghcr.io/grafana-community/helm-charts/loki --version 18.13.5 -n monitoring -f deploy/observability/loki-values.yaml --wait
 ```
 
 Port-forward Prometheus:

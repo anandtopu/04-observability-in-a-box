@@ -1,0 +1,39 @@
+# Loki 3.7.8, monolithic (chart grafana-community/loki 18.13.5, OCI on ghcr.io). Spec section 5, M3.
+#   helm install loki oci://ghcr.io/grafana-community/helm-charts/loki --version 18.13.5 \
+#     -n monitoring -f deploy/observability/loki-values.yaml
+# The OTLP endpoint (/otlp) indexes service.name as service_name and keeps trace_id / span_id
+# as structured metadata: stored per line and filterable, but never an index label.
+deploymentMode: Monolithic
+loki:
+  auth_enabled: false
+  commonConfig: { replication_factor: 1 }
+  storage: { type: filesystem }
+  useTestSchema: true          # lab only; production pins a real schemaConfig
+  # A map, so this merges with the chart's limits_config defaults instead of replacing them.
+  limits_config:
+    allow_structured_metadata: true
+    retention_period: 12h      # lab addition: spec 72h (D-02); enforced by the compactor below
+  # Lab additions (not in the spec): retention needs the compactor; no usage reports.
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+  analytics: { reporting_enabled: false }
+singleBinary:
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+# Not in the spec, but required by chart 18.13.5: read/write/backend default to 3 replicas each
+# and templates/validate.yaml fails when they coexist with singleBinary (DEVIATIONS D-16).
+read: { replicas: 0 }
+write: { replicas: 0 }
+backend: { replicas: 0 }
+# Lab addition: the same k8s-sidecar image kps uses, from quay.io instead of docker.io
+# (Docker Hub's shared anonymous quota answered 429 for it, D-05).
+sidecar:
+  image: { registry: quay.io }
+gateway: { enabled: false }
+chunksCache: { enabled: false }
+resultsCache: { enabled: false }
+lokiCanary: { enabled: false }
+test: { enabled: false }

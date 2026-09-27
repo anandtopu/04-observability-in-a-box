@@ -1,0 +1,11 @@
+$ kubectl -n monitoring get pods
+NAME                                 READY   STATUS    RESTARTS   AGE
+alertmanager-kps-alertmanager-0      2/2     Running   0          90m
+kps-grafana-85c77568bf-z6c4x         3/3     Running   0          80m
+kps-operator-b656c85bd-psjv6         1/1     Running   0          90m
+kps-prometheus-node-exporter-56znf   1/1     Running   0          90m
+loki-0                               2/2     Running   0          56s
+prometheus-kps-prometheus-0          2/2     Running   0          90m
+tempo-0                              1/1     Running   0          56s
+
+tempo-0 Ready=True  loki-0 Ready=True

@@ -203,3 +203,65 @@ One section per milestone, in the template from `docs/CLOUD_BUILD_PROMPT.md`. Nu
 2. It adds one label to every app series. Its values change only per rollout (one hash per ReplicaSet), so it multiplies series by the number of live ReplicaSets (1–2 during a canary), and P03 needs it to compare canary vs stable. `k8s.pod.uid` would duplicate `instance` (already the pod UID) without adding information, and every label costs index memory. Promote only what queries need, and leave the rest on `target_info`.
 3. (a) The sample interval vs the range: with 60 s pushes, a `[1m]`/`[2m]` window can hold fewer than two different samples (fix: 15 s pushes and `$__rate_interval`). (b) The exporter wasn't connected: orders' gRPC client sat in DNS backoff for minutes after the gateway Service reappeared. The first shows as zero-rate data; the second as missing series. Check `timestamp()` of `target_info` to tell them apart.
 </details>
+
+## M3 — Tempo and Loki (monolithic)   (2026-09-27, session 1, tier A)
+
+**Goal / requirement served:** FR-3 (traces reach Tempo, with span metrics and exemplars; logs reach Loki with `trace_id`/`span_id` as structured metadata), groundwork for FR-4 (exemplar → trace → logs). Ground-truth trap handled: the OSS Tempo and Loki charts now come from **`grafana-community`** (OCI on ghcr.io).
+
+**What we built:**
+- `deploy/observability/tempo-values.yaml`: Tempo **3.0.3** (chart 3.0.0), a single binary. The metrics-generator runs `service-graphs` and `span-metrics` and remote-writes to `kps-prometheus` with `send_exemplars: true`. 12 h retention, no usage reports.
+- `deploy/observability/loki-values.yaml`: Loki **3.7.8** (chart 18.13.5), `Monolithic`, filesystem, `allow_structured_metadata`, 12 h retention through the compactor, no analytics, and **`read`/`write`/`backend` replicas 0** (a spec error, D-16). The sidecar comes from quay.io.
+- `scripts/kind-load-images.sh`: M3 list, plus a loader rewritten around `ctr import --platform linux/amd64`, with a fresh-pull fallback (D-18).
+- `tests/fixtures/otel-bridge-gateway.yaml`: now carries the spec's three exporters and OTLP/HTTP (temporary; deleted after the gate).
+- `tests/m3-correlation.sh`: the correlation gate, reusable in M4.
+
+**How the data flows:**
+- **Trace:** orders' server span → OTLP/gRPC → gateway (`otlp_grpc/tempo`, batching in its `sending_queue`) → Tempo's distributor → ingester → blocks on the local filesystem. Queryable at `:3200/api/v2/traces/<id>`.
+- **Span metrics:** Tempo's metrics-generator also sees every span. It counts calls, sizes and latency per `(service, span name, kind, status)` and builds the service graph from client/server span pairs (`orders → inventory`). It remote-writes these to Prometheus as `traces_spanmetrics_*` / `traces_service_graph_*`, attaching exemplars that point back at real traces.
+- **Log:** a JSON line → (M4: the agent's `file_log` + `json_parser` lift `trace_id`/`span_id` into the OTLP record's traceId/spanId) → gateway `otlp_http/loki` → Loki `/otlp`.
+- In Loki, **resource** attributes on its default list become index labels (`service_name`, `service_namespace`, `service_instance_id`, `k8s_pod_name`, …). The record's `trace_id`/`span_id`, plus `severity_*`, `scope_name` and `observed_timestamp`, become **structured metadata**, stored with the line and filterable (`| trace_id="…"`) but never indexed.
+- Grafana (provisioned in M2) already has `tempo` and `loki` datasources: Tempo → Loki via `tracesToLogsV2` (`filterByTraceID`, `service.name → service_name`), and Loki → Tempo via the `trace_id` derived field. M5 clicks through them.
+
+**Commands run, in order:**
+
+| Command | What it does | Key output |
+|---|---|---|
+| `helm pull oci://ghcr.io/grafana-community/helm-charts/{tempo,loki} --untar` + `grep` | Checks the spec's keys against the real charts | Tempo's keys map 1:1 (`overrides` rendered via `toYaml`); Loki's keys exist, `limits_config` is a map (merges with chart defaults) |
+| `helm template loki … -f loki-values.yaml` | Renders | **Fails** on validate.yaml (D-16). With the fix: 1 StatefulSet |
+| `bash scripts/kind-load-images.sh m3` | Side-loads | Tempo OK; Loki blocked by a broken local blob, then 4 s with the reworked loader; kiwigrid 429 → switched to quay.io |
+| `helm install tempo …` ‖ `helm install loki …` (parallel, `--wait`) | Installs | both in **46 s** |
+| `kubectl -n monitoring get pods` | The spec's gate | `tempo-0` 1/1, `loki-0` 2/2 Ready (`docs/evidence/p04/m3-gate-pods.txt`) |
+| `curl :3100/config`, `:3200/status/config` | Effective config | Loki: structured metadata on, 12h, 18 default OTLP index labels; Tempo: both processors |
+| In-cluster k6 (10 req/s × 60 s) + `bash tests/m3-correlation.sh` | The correlation gate | **9 passed, 0 failed** (`m3-correlation.txt`) |
+| PromQL `count(...)` | Cardinality and memory | 25,185 active series (+321 from `traces_*`); Prometheus 291 MiB, Loki 118 MiB, Tempo 100 MiB (`m3-series.txt`) |
+
+**Verification:**
+- *Spec gate:* `tempo-0` and `loki-0` Ready. **PASS.**
+- *Build prompt's gate:* one trace and one log line found by trace_id. **PASS** for `trace_id=909e13cb843b7b562876e780d5c98c92`:
+  - Tempo returns 9 spans across `orders` and `inventory`.
+  - Loki returns the orders line for `{service_name="orders"} | trace_id="909e13cb…"`, and `trace_id` is absent from `/loki/api/v1/labels`.
+  - The log line entered through the bridge's OTLP/HTTP endpoint as a stand-in for the M4 agent, **labelled as such**. It's the exact JSON line orders printed, with its real trace and span IDs.
+- *Also:* span-metric series for orders, the `orders → inventory` service-graph edge, and 52 span-metric exemplars in Prometheus.
+
+**What broke and how we fixed it:**
+1. *The spec's Loki values fail to render* on chart 18.13.5 (D-16). Evidence: the validate.yaml error. Root cause: the SimpleScalable targets default to 3 replicas each. Fix: set them to 0. This is a spec correction, recorded rather than applied silently.
+2. *`grafana/loki:3.7.8` couldn't be loaded into kind,* for two independent reasons (D-18):
+   - Docker's store had the amd64 manifest but an unreadable 162-byte shared layer, so every `docker save` failed, even after a successful re-pull.
+   - `kind load` insists on all platforms.
+   - Fix: pull with `ctr` into a separate namespace (Docker's own images untouched), export amd64, and import into the node with `--platform linux/amd64`. That's now the script's default path.
+3. *Docker Hub 429 for `docker.io/kiwigrid/k8s-sidecar`.* Fix: the identical image from quay.io, already on the node.
+4. *orders' exporter reconnect lag again* after the bridge Service reappeared: about 40 s this time, 2–3 minutes in M2. Consistent with grpc-go's DNS re-resolution backoff; noted for M4's "never delete the gateway Service".
+
+**Lab vs customer environment:** at Cobalt, traces usually stay in Beacon's Tempo, because the SOC wants logs (M7). If the customer runs its own Tempo or Jaeger v2, it's another `otlp_grpc` exporter, never Jaeger v1 (EOL). Storage becomes object storage (S3/GCS/MinIO) with real retention: the SOC contract says 60 s to Splunk, not how long Beacon keeps traces. Loki's default index labels include `k8s.pod.name` and `service.instance.id`, which churn per rollout; at scale, pin `otlp_config` to a short, reviewed list. Northstar's Datadog ingests the same OTLP traces, and APM stats need the `datadog/connector` (M7).
+
+**Check yourself:**
+1. Why is `trace_id` structured metadata in Loki and not a label, and what would happen at 100 req/s if it were a label?
+2. The service graph showed an `orders → inventory` edge. Which spans did Tempo pair to build it, and why does the edge disappear if inventory's traces are sampled differently from orders'?
+3. The spec's Loki file failed to render. Why is it better that the chart *failed* than rendered something?
+
+<details><summary>answers</summary>
+
+1. Every distinct label set is a separate Loki stream, with its own chunks and index entries. A trace ID per request means one new stream per request: 100 req/s is 360,000 tiny streams an hour, crushing the ingester and index (Loki's classic cardinality failure). As structured metadata the ID is stored next to each line inside the few streams per pod, and `| trace_id="…"` filters within the streams selected by the indexed `service_name`.
+2. It pairs orders' **client** span (`HTTP POST`, kind client) with inventory's **server** span (`POST /v1/reservations`, kind server) that has the client span as its parent. If inventory drops traces orders keeps, or vice versa, one half of each pair never reaches Tempo, and the edge vanishes or its counts become wrong. That's why sampling is parent-based (the child follows the parent's decision) and why tail sampling needs span metrics computed *before* sampling (§10).
+3. A render that silently kept `read`/`write`/`backend` at 3 replicas each would have created a SimpleScalable deployment beside the monolith on shared storage it doesn't support: 10 pods, far more RAM, and confusing write paths, discovered at runtime. A validation failure costs one minute at render time, with an explicit message.
+</details>

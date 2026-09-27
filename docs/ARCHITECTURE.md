@@ -19,7 +19,11 @@ The target is spec section 3. This file tracks what exists today; `[x]` means bu
  ZONE: backends (ns monitoring)   [x] Prometheus "kps" 3.14.0: OTLP receiver, exemplars, 12h (M2)
                                   [x] Alertmanager: page / ticket -> Mailpit, Watchdog -> null (M2)
                                   [x] Grafana 13.2.2 (datasources for Tempo/Loki pre-provisioned) (M2)
-                                  [ ] Tempo, Loki (M3)   [ ] kube-state-metrics (D-14)
+                                  [x] Tempo 3.0.3 monolithic: OTLP :4317, query :3200, metrics-generator
+                                      (span-metrics, service-graphs) -> remote write + exemplars -> Prometheus (M3)
+                                  [x] Loki 3.7.8 monolithic: OTLP /otlp :3100, trace_id/span_id as
+                                      structured metadata, service_name indexed, 12h retention (M3)
+                                  [ ] kube-state-metrics (D-14)
  TRUST BOUNDARY: customer egress  [ ] export overlay + customer-sim + proxy-sim (M7)
 
  Runtime: kind "freightline", 1 node, Kubernetes v1.36.4, containerd 2.3.4 (Tier A)
@@ -29,9 +33,9 @@ The target is spec section 3. This file tracks what exists today; `[x]` means bu
 
 | Signal | Emitted by | Transport today | Target path (milestone) |
 |---|---|---|---|
-| Traces | orders (OTel Go SDK + otelhttp + otelpgx), inventory (FastAPI instrumented in code; psycopg via `opentelemetry-instrument`) | OTLP/gRPC to `otel-gateway.observability:4317`, **not listening yet**, so spans are dropped | gateway → Tempo (M3/M4) |
+| Traces | orders (OTel Go SDK + otelhttp + otelpgx), inventory (FastAPI instrumented in code; psycopg via `opentelemetry-instrument`) | OTLP/gRPC to `otel-gateway.observability:4317` (the gateway arrives in M4; until then spans are dropped) | gateway `otlp_grpc/tempo` → `tempo.monitoring:4317`; Tempo's metrics-generator writes `traces_spanmetrics_*` and `traces_service_graph_*` (with exemplars) to Prometheus (backend live since M3) |
 | Metrics | same SDKs, every 15 s: `http.server.request.duration` (s) with `http.route`, DB client metrics | same as traces | gateway → `http://kps-prometheus.monitoring:9090/api/v1/otlp` (receiver live since M2; the gateway arrives in M4). In PromQL: `http_server_request_duration_seconds_*{job="freightline/<svc>", instance="<pod uid>"}` plus promoted labels `service_version`, `deployment_environment_name`, `freightline_pod_template_hash` (`k8s_namespace_name`, `k8s_pod_name` arrive with the gateway's `k8s_attributes`); other resource attributes on `target_info` |
-| Logs | stdout JSON with `trace_id`, `span_id`, lowercase `level` | container runtime log files on the node | agent `file_log` → gateway → Loki (M3/M4) |
+| Logs | stdout JSON with `trace_id`, `span_id`, lowercase `level` | container runtime log files on the node | agent `file_log` → gateway `otlp_http/loki` → `http://loki.monitoring:3100/otlp` (backend live since M3). Loki indexes `service_name` (plus its default OTLP index labels, including `service_instance_id` and `k8s_pod_name`); `trace_id`/`span_id` are structured metadata: `{service_name="orders"} \| trace_id="<id>"` |
 | Alerts | kps rules (M2), Sloth rules (M6) | Alertmanager: `severity="page"` → `page@lab.local`, everything else → `ticket@lab.local`, `Watchdog` → `null`, via `mailpit.freightline:1025` | done (routing verified M2) |
 
 ## App contract (set only by the library chart)

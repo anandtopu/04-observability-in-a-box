@@ -36,22 +36,46 @@ M2=(
   docker.io/grafana/grafana:13.2.2-distroless     # the only Docker Hub image so far
 )
 
+# M3: grafana-community tempo 3.0.0 and loki 18.13.5 (Docker Hub). Loki's rules sidecar is pointed
+# at the quay.io kiwigrid image kps already uses (loki-values.yaml), saving a Docker Hub pull.
+M3=(
+  docker.io/grafana/tempo:3.0.3
+  docker.io/grafana/loki:3.7.8
+)
+
 case "${1:-all}" in
   m0) IMAGES=("${M0[@]}") ;;
   m1) IMAGES=("${M1[@]}") ;;
   m2) IMAGES=("${M2[@]}") ;;
-  all) IMAGES=("${M0[@]}" "${M1[@]}" "${M2[@]}") ;;
+  m3) IMAGES=("${M3[@]}") ;;
+  all) IMAGES=("${M0[@]}" "${M1[@]}" "${M2[@]}" "${M3[@]}") ;;
   *) echo "unknown set: $1" >&2; exit 2 ;;
 esac
 
-# Docker 29's containerd image store saves a multi-platform index whose other-arch layers
-# were never pulled, and `kind load docker-image` (ctr import --all-platforms) then fails with
-# "content digest ... not found". Saving only linux/amd64 and loading the archive avoids it.
+# Loading into the kind node, amd64 only. Two Docker 29 (containerd image store) pitfalls:
+#  1. `docker save` keeps the multi-platform index, and `kind load` imports with --all-platforms,
+#     which fails on arm/v7 or arm64 blobs that were never pulled ("content digest ... not found").
+#     So we import ourselves with `ctr import --platform linux/amd64`.
+#  2. Docker can report an image complete while a shared layer blob is unreadable (grafana/loki:3.7.8,
+#     M3), so `docker save` fails. Fallback: pull fresh with ctr into a separate namespace ("p04",
+#     Docker's own images untouched) and export from there.
+NODE="${CLUSTER}-control-plane"
+DOCKER_CTRD=/var/run/docker/containerd/containerd.sock
+import_tar() { docker exec -i "$NODE" ctr -n k8s.io images import --platform linux/amd64 - < "$1" >/dev/null 2>&1; }
 load() {
-  local tar; tar="$(mktemp --suffix=.tar)"
-  docker save --platform linux/amd64 -o "$tar" "$1" && kind load image-archive "$tar" --name "$CLUSTER" >/dev/null 2>&1
-  local rc=$?; rm -f "$tar"; return $rc
+  local tar; tar="$(mktemp --suffix=.tar)"; local rc=1
+  if docker save --platform linux/amd64 -o "$tar" "$1" 2>/dev/null && import_tar "$tar"; then
+    rc=0
+  elif [ -S "$DOCKER_CTRD" ] \
+    && ctr -a "$DOCKER_CTRD" -n p04 images pull --platform linux/amd64 "$(ref "$1")" >/dev/null 2>&1 \
+    && ctr -a "$DOCKER_CTRD" -n p04 images export --platform linux/amd64 "$tar" "$(ref "$1")" 2>/dev/null \
+    && import_tar "$tar"; then
+    rc=0
+  fi
+  rm -f "$tar"; return $rc
 }
+# ctr needs fully qualified names (docker.io/library/... for official images).
+ref() { case "$1" in *.*/*) echo "$1" ;; */*) echo "docker.io/$1" ;; *) echo "docker.io/library/$1" ;; esac; }
 
 rc=0
 for img in "${IMAGES[@]}"; do

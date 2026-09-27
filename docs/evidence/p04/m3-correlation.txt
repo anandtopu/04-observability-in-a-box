@@ -1,0 +1,15 @@
+== source: orders-579f6d467f-c28x7, trace_id=909e13cb843b7b562876e780d5c98c92 span_id=746c9df533c22076
+PASS  log line has a 32-hex trace_id (32)
+== trace in Tempo
+PASS  Tempo returns the trace's spans (9 >= 5)
+PASS  trace contains both services (inventory,orders)
+== log line through the gateway's OTLP/HTTP endpoint into Loki (stand-in for the M4 agent)
+PASS  gateway accepted the log record (200)
+PASS  Loki finds the line by trace_id (909e13cb843b7b562876e780d5c98c92)
+   stream + structured metadata: {"detected_level":"info","observed_timestamp":"1790542299388787092","scope_name":"m3-correlation-test","service_instance_id":"2cf9a256-6c62-4033-a2c6-8e6f19237539","service_name":"orders","service_namespace":"freightline","severity_number":"9","severity_text":"info","span_id":"746c9df533c22076","trace_id":"909e13cb843b7b562876e780d5c98c92"}
+PASS  trace_id is NOT an index label (false)
+== Tempo metrics-generator -> Prometheus (remote write)
+PASS  span metrics (traces_spanmetrics_calls_total) series (9 >= 1)
+PASS  service graph edge orders -> inventory (1 >= 1)
+PASS  span-metrics exemplars (send_exemplars: true) (52 >= 1)
+== 9 passed, 0 failed

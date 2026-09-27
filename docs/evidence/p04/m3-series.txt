@@ -1,0 +1,20 @@
+== series after M3 (20:52:26)
+   active series total: 25185  (budget < 50,000; M2 ended at 24,031)
+   Tempo metrics-generator series (traces_*): 321
+     12	traces_spanmetrics_size_total
+     4	traces_service_graph_request_total
+     12	traces_spanmetrics_calls_total
+     4	traces_service_graph_request_server_seconds_sum
+     4	traces_service_graph_request_server_seconds_count
+     36	traces_service_graph_request_server_seconds_bucket
+     4	traces_service_graph_request_client_seconds_sum
+     4	traces_service_graph_request_client_seconds_count
+     36	traces_service_graph_request_client_seconds_bucket
+     12	traces_spanmetrics_latency_sum
+     12	traces_spanmetrics_latency_count
+     180	traces_spanmetrics_latency_bucket
+     1	traces_service_graph_request_failed_total
+== memory (kubectl top unavailable: no metrics-server; from container_memory_working_set_bytes)
+   prometheus-kps-prometheus-0: 291 MiB
+   loki-0: 118 MiB
+   tempo-0: 100 MiB

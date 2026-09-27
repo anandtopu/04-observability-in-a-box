@@ -1,0 +1,21 @@
+# Tempo 3.0.3, monolithic (chart grafana-community/tempo 3.0.0, OCI on ghcr.io). Spec section 5, M3.
+#   helm install tempo oci://ghcr.io/grafana-community/helm-charts/tempo --version 3.0.0 \
+#     -n monitoring -f deploy/observability/tempo-values.yaml
+# One binary, filesystem storage, no Kafka: the lab-sized version of Tempo 3's architecture.
+tempo:
+  reportingEnabled: false        # no usage reports to Grafana Labs (no phone-home, see D-12)
+  retention: 12h                 # spec: 72h (DEVIATIONS D-02)
+  metricsGenerator:
+    enabled: true
+    storage:
+      path: /var/tempo/generator
+      # Span metrics and the service graph go to Prometheus's remote-write receiver (enabled in M2),
+      # with exemplars, so a span-metrics latency panel links straight back to traces.
+      remote_write: [{ url: "http://kps-prometheus.monitoring:9090/api/v1/write", send_exemplars: true }]
+  overrides:
+    defaults:
+      metrics_generator: { processors: [service-graphs, span-metrics] }
+  # Lab sizing (not in the spec).
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
