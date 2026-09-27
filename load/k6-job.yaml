@@ -32,6 +32,7 @@ spec:
             - { name: BASE_URL, value: "http://orders.freightline:8080" }
             - { name: RATE, value: "10" }
             - { name: DURATION, value: "60s" }
+            - { name: K6_NO_USAGE_REPORT, value: "true" }   # k6 phones home to stats.grafana.org by default
           resources:
             requests: { cpu: 100m, memory: 64Mi }
             limits: { memory: 256Mi }

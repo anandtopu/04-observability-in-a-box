@@ -1,6 +1,8 @@
 // Steady order traffic for P04-lite. Constant arrival rate: RATE requests/s whatever the
 // latency, so a slow backend shows up as latency and errors, not as less traffic.
-//   k6 run -e BASE_URL=http://localhost:18080 -e RATE=20 -e DURATION=5m load/steady.js
+//   k6 run --no-usage-report -e BASE_URL=http://localhost:18080 -e RATE=20 -e DURATION=5m load/steady.js
+// (--no-usage-report: k6 otherwise sends a usage report to stats.grafana.org; the session proxy
+//  blocked it, and a customer's SOC would ask why a lab tool calls out.)
 // The spec's target is 100 req/s; the cloud VM may not reach it through a port-forward.
 // Record the rate you actually ran next to the target (never report the target as a result).
 import http from "k6/http";

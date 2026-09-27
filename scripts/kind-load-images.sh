@@ -22,10 +22,25 @@ M1=(
   grafana/k6:2.3.0          # in-cluster load (load/k6-job.yaml)
 )
 
+# M2: kube-prometheus-stack 91.5.1 (list from `helm template`; the config-reloader is injected
+# by the operator via --prometheus-config-reloader, so it never appears as an image: line).
+M2=(
+  quay.io/prometheus/prometheus:v3.14.0-distroless
+  quay.io/prometheus-operator/prometheus-operator:v0.94.1
+  quay.io/prometheus-operator/prometheus-config-reloader:v0.94.1
+  quay.io/prometheus/alertmanager:v0.34.1
+  quay.io/prometheus/node-exporter:v1.12.1-distroless
+  quay.io/kiwigrid/k8s-sidecar:2.11.2
+  registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.20.0
+  ghcr.io/jkroepke/kube-webhook-certgen:1.8.8
+  docker.io/grafana/grafana:13.2.2-distroless     # the only Docker Hub image so far
+)
+
 case "${1:-all}" in
   m0) IMAGES=("${M0[@]}") ;;
   m1) IMAGES=("${M1[@]}") ;;
-  all) IMAGES=("${M0[@]}" "${M1[@]}") ;;
+  m2) IMAGES=("${M2[@]}") ;;
+  all) IMAGES=("${M0[@]}" "${M1[@]}" "${M2[@]}") ;;
   *) echo "unknown set: $1" >&2; exit 2 ;;
 esac
 

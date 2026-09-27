@@ -1,0 +1,87 @@
+# kube-prometheus-stack 91.5.1 for P04 (spec section 5, M2). P03 installs Prometheus with this
+# file: fullnameOverride "kps" yields the kps-prometheus Service its AnalysisTemplate queries.
+#   helm install kps prometheus-community/kube-prometheus-stack --version 91.5.1 \
+#     -n monitoring --create-namespace -f deploy/observability/kps-values.yaml
+# OTLP metrics get job = service.namespace/service.name and instance = service.instance.id.
+fullnameOverride: kps
+
+prometheus:
+  prometheusSpec:
+    enableOTLPReceiver: true            # --web.enable-otlp-receiver: apps push, nothing scrapes them
+    enableRemoteWriteReceiver: true     # Tempo's metrics-generator writes span metrics here (M3)
+    enableFeatures: [exemplar-storage]  # still a feature flag (native histograms are not, since 3.8)
+    exemplars: { maxSize: 100000 }
+    tsdb: { outOfOrderTimeWindow: 30m } # several gateway replicas push; batches can arrive late
+    otlp:
+      # Copied onto every series as labels. Everything else stays on the single target_info
+      # series per instance. Each entry is a cardinality decision: never IDs that grow with traffic.
+      promoteResourceAttributes: [service.version, deployment.environment.name, k8s.namespace.name, k8s.pod.name, freightline.pod_template_hash]
+    retention: 12h                      # spec: 72h; the cloud VM is reclaimed when idle (DEVIATIONS D-02)
+    ruleSelectorNilUsesHelmValues: false         # pick up every PrometheusRule (Sloth output, M6)
+    serviceMonitorSelectorNilUsesHelmValues: false  # and every ServiceMonitor (the gateway's, M4)
+    # Lab sizing (not in the spec): 4 CPU / 15 GB VM, budget < 50k active series.
+    resources:
+      requests: { cpu: 200m, memory: 512Mi }
+      limits: { memory: 2Gi }
+
+prometheus-node-exporter:
+  hostRootFsMount: { enabled: false }   # kind / Docker Desktop reject the shared root mount
+
+alertmanager:
+  config:                               # lists replace the chart defaults, so keep "null"
+    route:
+      receiver: ticket
+      group_by: [alertname, service]
+      routes:
+        - { matchers: ['alertname="Watchdog"'], receiver: "null" }
+        - { matchers: ['severity="page"'], receiver: page }
+    receivers:
+      - name: "null"
+      - name: page
+        email_configs: [{ to: page@lab.local, from: am@lab.local, smarthost: "mailpit.freightline:1025", require_tls: false }]
+      - name: ticket
+        email_configs: [{ to: ticket@lab.local, from: am@lab.local, smarthost: "mailpit.freightline:1025", require_tls: false }]
+  alertmanagerSpec:
+    resources:
+      requests: { cpu: 10m, memory: 32Mi }
+      limits: { memory: 128Mi }
+
+grafana:
+  # Lab addition: the chart's default admin password is the well-known "prom-operator".
+  # Empty means the Grafana chart generates a random one into the kps-grafana Secret.
+  adminPassword: ""
+  # No phone-home: usage stats and update checks call grafana.com / stats.grafana.org.
+  # Cobalt's egress proxy would log (or block) them; the default mode needs no SaaS.
+  grafana.ini:
+    analytics: { reporting_enabled: false, check_for_updates: false, check_for_plugin_updates: false }
+  sidecar:
+    datasources:
+      exemplarTraceIdDestinations: { datasourceUid: tempo, traceIdLabelName: trace_id }
+  additionalDataSources:
+    - name: Tempo
+      uid: tempo
+      type: tempo
+      url: http://tempo.monitoring:3200
+      jsonData:
+        serviceMap: { datasourceUid: prometheus }
+        tracesToLogsV2:
+          datasourceUid: loki
+          filterByTraceID: true
+          spanStartTimeShift: "-5m"
+          spanEndTimeShift: "5m"
+          tags: [{ key: service.name, value: service_name }]
+    - name: Loki
+      uid: loki
+      type: loki
+      url: http://loki.monitoring:3100
+      jsonData:
+        derivedFields:   # "$$" stops Grafana provisioning from expanding ${__value.raw}
+          - { name: trace_id, matcherType: label, matcherRegex: trace_id, datasourceUid: tempo, url: "$${__value.raw}" }
+
+# kind runs etcd, the scheduler, the controller-manager and kube-proxy with metrics bound to
+# 127.0.0.1, so these targets are always down and their *Down alerts would fire forever into
+# the ticket route. Lab only (DEVIATIONS D-12); a real cluster keeps them.
+kubeEtcd: { enabled: false }
+kubeControllerManager: { enabled: false }
+kubeScheduler: { enabled: false }
+kubeProxy: { enabled: false }

@@ -81,7 +81,7 @@ bash tests/m0-smoke.sh
 Drive steady traffic:
 
 ```bash
-k6 run -e RATE=20 -e DURATION=1m load/steady.js
+k6 run --no-usage-report -e RATE=20 -e DURATION=1m load/steady.js
 ```
 
 Tier B (Compose) and Tier C (render-only) quick starts will be added if we ever fall back to them; this VM runs Tier A.
