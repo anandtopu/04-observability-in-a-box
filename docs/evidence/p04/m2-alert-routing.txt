@@ -1,0 +1,6 @@
+Alertmanager routing test (2026-09-27T19:28:42Z): posted M2RoutingTestPage (severity=page) and M2RoutingTestTicket (severity=ticket)
+Mailpit inbox:
+  to=ticket@lab.local  subject=[FIRING:1] M2RoutingTestTicket orders (ticket)
+  to=page@lab.local  subject=[FIRING:1] M2RoutingTestPage orders (page)
+Active Watchdog alert (routed to "null", so no email):
+  Watchdog receivers=null

@@ -138,3 +138,68 @@ One section per milestone, in the template from `docs/CLOUD_BUILD_PROMPT.md`. Nu
 2. The exclusion removes only the HTTP **server span**. The handler still runs `SELECT 1`, and psycopg's instrumentation traces it. With no parent span in context, it becomes a **root span** on every probe. The spec's gate checks only the rendered chart, and M4's gate checks the HTTP request-rate metric, which really is 0; neither looks at trace volume. Only looking at what a Collector actually receives shows it, which is why we inspect before trusting.
 3. Helm merges **maps** key by key but **replaces lists** whole, so `services[0].replicas=2` produced a new list with a single element that has no name or image. For M7, the Cobalt overlay has to restate any list it touches in full, for example `service.pipelines.logs.processors` and `exporters`. If it names only the new exporter, the Loki exporter silently disappears. That's why the spec's overlay lists both `otlp_http/loki` and `splunk_hec/cobalt`.
 </details>
+
+## M2 — Prometheus with the OTLP receiver   (2026-09-27, session 1, tier A)
+
+**Goal / requirement served:** FR-2 (metrics reach Prometheus's OTLP receiver with promoted resource attributes, including `freightline_pod_template_hash` for P03), ADR-P04-3 (OTLP push, not scrape), FR-6 groundwork (page/ticket routes), NFR cardinality and freshness.
+
+**What we built:**
+- `deploy/observability/kps-values.yaml`: kube-prometheus-stack **91.5.1**, `fullnameOverride: kps`. The spec's block as written (every key checked against the chart's `values.yaml` first), plus commented lab additions (DEVIATIONS D-12, D-15): 12 h retention, sizing, a random Grafana password, no phone-home, kind's localhost-only control-plane scrapers off, `defaultDatasourceScrapeInterval: 15s`, and apiserver cardinality drops.
+- `app/deploy/helm/freightline/templates/networkpolicy.yaml`: `allow-alertmanager-to-mailpit` (monitoring/alertmanager → mailpit:1025).
+- Library chart: `OTEL_METRIC_EXPORT_INTERVAL=15000`. orders: a metric View that drops `server.address`/`server.port`. Images are `0.2.4`.
+- `app/deploy.sh`: always `helm dependency build` before `helm upgrade --install`.
+- `scripts/kind-load-images.sh`: the M2 list (9 images, including the operator-injected `prometheus-config-reloader`, which never appears as an `image:` line).
+- `tests/fixtures/otel-bridge-gateway.yaml` (temporary, deleted after the gate): `otlp` → `otlp_http/prometheus` with `sending_queue: { batch: {} }`, the spec's M4 exporter block. It ran on Collector 0.161.0 with 0 errors and 0 deprecation warnings.
+- k6: `--no-usage-report` / `K6_NO_USAGE_REPORT=true`.
+
+**How the data flows:**
+- The SDK aggregates `http.server.request.duration` in the pod and pushes a cumulative snapshot **every 15 s** over OTLP/gRPC to `otel-gateway.observability:4317` (the bridge today, the real gateway in M4).
+- The Collector forwards it to `http://kps-prometheus.monitoring:9090/api/v1/otlp`, batching in the exporter's `sending_queue`.
+- Prometheus translates the names (`UnderscoreEscapingWithSuffixes`): the metric becomes `http_server_request_duration_seconds_{bucket,count,sum}`, and dots in attribute names become underscores.
+- Resource → labels: `job` = `service.namespace/service.name` (`freightline/orders`), `instance` = `service.instance.id` (the pod UID, from M1). The five **promoted** attributes become labels on every series. All other resource attributes (`telemetry.sdk.*`, …) go on **one `target_info` series per instance**, to be joined only when needed.
+- The histogram's exemplars (trace ID + span ID, M1) are stored in exemplar storage (100k) and returned by `/api/v1/query_exemplars`. Grafana's Prometheus datasource links `trace_id` to the `tempo` datasource uid, which lands in M3.
+- There is no scrape, so **there is no `up` metric** for the apps: absence has to be detected with `absent_over_time()` (§8's `OrdersMetricsAbsent`, M4).
+- Alerts: rule → Alertmanager → route on `severity` → Mailpit (`page@` or `ticket@`); `Watchdog` → `null`.
+
+**Commands run, in order:**
+
+| Command | What it does | Key output |
+|---|---|---|
+| `helm pull prometheus-community/kube-prometheus-stack --version 91.5.1 --untar` + `grep` for each spec key | Checks the spec against the real chart before running it | All keys exist. The chart is v0.94.1 operator; 91.7.1 is newer, kept the pin |
+| `helm template … \| grep image:` | Lists what the node must have | 8 images + config-reloader; Prometheus 3.14.0, Grafana 13.2.2 (match the digest) |
+| `bash scripts/kind-load-images.sh m2` | Side-loads | 8/9 OK; kube-state-metrics FAIL (`cdn.registry.k8s.io` Forbidden) |
+| `helm install kps … --set kubeStateMetrics.enabled=false --wait` | Installs | **28 s**; RAM used about 1 → 2 GB (13 GB available) |
+| The spec's `kubectl … jsonpath='{…args}'` | Gate half 1 | both flags present (`docs/evidence/p04/m2-gate-args.txt`) |
+| `curl …/api/v1/status/runtimeinfo`, `/status/config` | Where settings really live | retention 12h, OOO 30m, exemplars 100k and promotion are all **config-file** settings, not flags |
+| Bridge + in-cluster k6 (10 req/s × 60 s) + PromQL | Gate half 2 | both jobs, promoted labels, `target_info`, 5 exemplars (`docs/evidence/p04/m2-gate-otlp.txt`) |
+| `POST /api/v2/alerts` (page + ticket) + Mailpit API | Routing test | `page@` got the page, `ticket@` got the ticket, Watchdog → `null` (`m2-alert-routing.txt`) |
+| `curl …/api/v1/status/tsdb`, `count by (job)` | Cardinality | 43,860 → **24,031** active series after the drops (`m2-fixes.txt`) |
+
+**Verification:**
+- *Spec gate:* the Prometheus container args include `--web.enable-otlp-receiver` and `--enable-feature=exemplar-storage`. **PASS.**
+- *Build prompt's gate addition:* an OTLP metric is queryable with the promoted labels. **PASS**: `http_server_request_duration_seconds_count{job="freightline/orders", instance="99881ea2-…", service_version="0.2.3", deployment_environment_name="kind", freightline_pod_template_hash="5774fd6997", http_route="/v1/orders", …}`, and the same for inventory. `k8s_namespace_name`/`k8s_pod_name` are absent until the M4 gateway's `k8s_attributes` sets them (expected).
+- Also verified: the 15 s sample spacing on both services, 0 series with `server_address`, alert routing, and exemplars carrying `trace_id`/`span_id`.
+
+**What broke and how we fixed it:**
+1. *kube-state-metrics wouldn't pull.* `registry.k8s.io` redirected layers to `cdn.registry.k8s.io` (proxy 403). It was still denied after the host was added, because this container didn't pick up the change (no VM restart this time). Installed temporarily without it (D-14).
+2. *orders' metrics were missing while inventory's arrived.* Go's gRPC exporter kept failing with `name resolver error: produced zero addresses` for about 2–3 minutes after the `otel-gateway` Service reappeared (it was deleted at the end of M1). The Service had endpoints; Python reconnected at once. grpc-go re-resolves DNS with backoff after failures. It **recovered on its own** (0 failures in the next 110 s). Lesson for M4: the gateway Service must never disappear, which is another reason for replicas plus a PDB.
+3. *`rate(...[2m])` returned 0 for inventory right after load.* The raw samples showed the counter jumping 597 → 1188 between two samples **60 s apart**, so a 2-minute window at the wrong moment held two equal values. Root cause: the SDK's default 60 s export interval, which also breaks the < 30 s freshness NFR. Fix: `OTEL_METRIC_EXPORT_INTERVAL=15000`, and Grafana's `$__rate_interval` set for 15 s.
+4. *The 15 s interval didn't apply.* The pods had no such env var: the umbrella chart renders the **packaged** library chart (`charts/*.tgz`), and I hadn't re-run `helm dependency build`. Fix: rebuilt, and added `app/deploy.sh`, which always rebuilds first. (M1 was unaffected: its gate ran after a rebuild.)
+5. *`server_address`/`server_port` labels from the `Host` header* on orders' histogram (the port-forward's `localhost:18080` vs k6's `orders.freightline:8080`). Untrusted input was creating series. Fix: an SDK View deny-list (D-15b).
+6. *43,860 active series on first install*, 88% of the budget before the app did anything. 25,268 came from the apiserver job; the 8 largest histograms have no consumers in kps's rules or dashboards. Fix: drop them at scrape time. The chart's default relabel list had to be **restated**, because lists replace (the M1 lesson again). The first re-measure still showed 25,302 because a reload recreates the scrape loop without staleness markers, so dropped series stay visible for the 5-minute lookback. Re-measured after it: **24,031** total, apiserver 10,842.
+7. *NetworkPolicy isn't enforced in this lab* (D-13). The §12 failure couldn't be reproduced: the email arrived *without* the allow rule. kindnet's policy engine fails every nftables sync on this kernel.
+8. *Phone-home.* The proxy log showed a blocked `stats.grafana.org` from the M0 k6 run. k6 usage reports and Grafana analytics/update checks are now off.
+
+**Lab vs customer environment:** at Cobalt, Prometheus usually isn't ours: we'd push to *their* OTLP-capable backend, or keep this in-cluster for Beacon's on-call and export only logs to Splunk (M7). Their network team will ask which ports accept pushes: the OTLP receiver has no auth of its own, so only the gateway should reach it (a NetworkPolicy, on a CNI that enforces it; test enforcement, don't assume it). Their proxy blocks phone-home by default, which is why analytics is off here rather than failing noisily there. Northstar: Datadog ingests the same OTLP metrics, but its label rules differ; the promotion list becomes a Datadog tag allow-list.
+
+**Check yourself:**
+1. Why is there no `up` metric for orders, and what replaces it?
+2. What does promoting `freightline.pod_template_hash` cost, and why is promoting `k8s.pod.uid` a bad idea when `service.instance.id` is already the pod UID?
+3. A dashboard shows `rate(...[1m])` = 0 during a load test while the logs show traffic. List two causes we saw in this milestone.
+
+<details><summary>answers</summary>
+
+1. `up` is produced by the *scraper* for each target it scrapes. With OTLP push, Prometheus scrapes nothing for the apps, so "the app stopped sending" looks exactly like "no data". Alert on absence instead: `absent_over_time(http_server_request_duration_seconds_count{job="freightline/orders"}[10m])` (§8), plus the gateway's own `otelcol_*` metrics (M4). ADR-P04-3 accepts that trade.
+2. It adds one label to every app series. Its values change only per rollout (one hash per ReplicaSet), so it multiplies series by the number of live ReplicaSets (1–2 during a canary), and P03 needs it to compare canary vs stable. `k8s.pod.uid` would duplicate `instance` (already the pod UID) without adding information, and every label costs index memory. Promote only what queries need, and leave the rest on `target_info`.
+3. (a) The sample interval vs the range: with 60 s pushes, a `[1m]`/`[2m]` window can hold fewer than two different samples (fix: 15 s pushes and `$__rate_interval`). (b) The exporter wasn't connected: orders' gRPC client sat in DNS backoff for minutes after the gateway Service reappeared. The first shows as zero-rate data; the second as missing series. Check `timestamp()` of `target_info` to tell them apart.
+</details>

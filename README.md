@@ -6,7 +6,7 @@ A learning build from the FDE Onboarding Handbook: Beacon's standard observabili
 - dashboards and SLO burn-rate alerts as code;
 - a customer-export overlay for Splunk or Datadog behind a TLS-inspecting proxy.
 
-**Status:** M0 done (Tier A kind, P04-lite app deployed, gate 13/13). Progress: [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md); departures from the spec: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md). The build is done in **Claude Code cloud sessions**, following [`docs/CLOUD_BUILD_PROMPT.md`](docs/CLOUD_BUILD_PROMPT.md).
+**Status:** M0–M2 done (Tier A kind, P04-lite app, instrumentation hygiene, Prometheus with the OTLP receiver). Progress: [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md); departures from the spec: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md). The build is done in **Claude Code cloud sessions**, following [`docs/CLOUD_BUILD_PROMPT.md`](docs/CLOUD_BUILD_PROMPT.md).
 
 | Path | What it is |
 |---|---|
@@ -45,7 +45,7 @@ bash scripts/kind-load-images.sh
 Build and side-load the app images:
 
 ```bash
-bash app/build-images.sh 0.2.3
+bash app/build-images.sh 0.2.4
 ```
 
 Create the PSA-restricted namespace:
@@ -54,22 +54,32 @@ Create the PSA-restricted namespace:
 kubectl apply -f app/deploy/namespaces.yaml
 ```
 
-Fetch the library chart into the umbrella chart:
+Install or upgrade the app (always rebuilds the library-chart dependency first):
 
 ```bash
-helm dependency build app/deploy/helm/freightline
-```
-
-Install the app:
-
-```bash
-helm install freightline app/deploy/helm/freightline -n freightline -f app/deploy/envs/kind/values.yaml --wait
+bash app/deploy.sh
 ```
 
 Port-forward orders (and, in two more terminals, `svc/inventory 18081:8080` and `svc/mailpit 18025:8025`):
 
 ```bash
 kubectl -n freightline port-forward svc/orders 18080:8080
+```
+
+Install Prometheus, Alertmanager and Grafana (kube-prometheus-stack; about 30 s). Add `--set kubeStateMetrics.enabled=false` only while `cdn.registry.k8s.io` is blocked (DEVIATIONS D-14):
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+```
+
+```bash
+helm install kps prometheus-community/kube-prometheus-stack --version 91.5.1 -n monitoring --create-namespace -f deploy/observability/kps-values.yaml --wait
+```
+
+Port-forward Prometheus:
+
+```bash
+kubectl -n monitoring port-forward svc/kps-prometheus 9090:9090
 ```
 
 Run the M0 gate:

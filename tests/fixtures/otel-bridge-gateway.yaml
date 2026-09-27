@@ -1,0 +1,68 @@
+# TEMPORARY test fixture (M2 gate), not part of the platform. A minimal Collector at the contract
+# address otel-gateway.observability:4317 that forwards metrics to Prometheus's OTLP receiver,
+# with the same exporter block as the spec's M4 gateway (otlp_http/prometheus + sending_queue.batch).
+# Traces go to debug (Tempo arrives in M3). Delete before M4 installs the real gateway:
+#   kubectl delete -f tests/fixtures/otel-bridge-gateway.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: observability
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-bridge-gateway
+  namespace: observability
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc: { endpoint: 0.0.0.0:4317 }
+    exporters:
+      otlp_http/prometheus:
+        endpoint: http://kps-prometheus.monitoring:9090/api/v1/otlp
+        sending_queue: { batch: {} }
+      debug: { verbosity: basic }
+    service:
+      pipelines:
+        metrics: { receivers: [otlp], exporters: [otlp_http/prometheus] }
+        traces: { receivers: [otlp], exporters: [debug] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-bridge-gateway
+  namespace: observability
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: otel-bridge-gateway }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: otel-bridge-gateway }
+    spec:
+      containers:
+        - name: otelcol
+          image: otel/opentelemetry-collector-contrib:0.161.0
+          imagePullPolicy: IfNotPresent
+          args: ["--config=/conf/config.yaml"]
+          ports:
+            - { name: otlp-grpc, containerPort: 4317 }
+          resources:
+            limits: { memory: 256Mi }
+          volumeMounts:
+            - { name: conf, mountPath: /conf }
+      volumes:
+        - name: conf
+          configMap: { name: otel-bridge-gateway }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-gateway   # the P02/P04 contract address
+  namespace: observability
+spec:
+  selector: { app.kubernetes.io/name: otel-bridge-gateway }
+  ports:
+    - { name: otlp-grpc, port: 4317, targetPort: otlp-grpc }

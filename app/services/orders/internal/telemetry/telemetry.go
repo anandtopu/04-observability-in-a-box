@@ -9,6 +9,7 @@ import (
 	"log/slog"
 
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
@@ -41,7 +42,16 @@ func Setup(ctx context.Context) (func(context.Context) error, error) {
 
 	// The sampler comes from OTEL_TRACES_SAMPLER / _ARG (parentbased_traceidratio in the chart).
 	tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(traceExp), sdktrace.WithResource(res))
-	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp)), sdkmetric.WithResource(res))
+	// otelhttp puts server.address/server.port from the client's Host header on the server
+	// histogram: the same request splits by how it was addressed, and any client can mint new
+	// series with arbitrary Host values (unbounded cardinality from untrusted input, M2 finding).
+	dropHost := sdkmetric.NewView(
+		sdkmetric.Instrument{Name: "http.server.*"},
+		sdkmetric.Stream{AttributeFilter: attribute.NewDenyKeysFilter("server.address", "server.port")},
+	)
+	// The export interval comes from OTEL_METRIC_EXPORT_INTERVAL (15 s, set by the chart).
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp)),
+		sdkmetric.WithResource(res), sdkmetric.WithView(dropHost))
 	otel.SetTracerProvider(tp)
 	otel.SetMeterProvider(mp)
 	// W3C traceparent in and out, so orders -> inventory is one trace.

@@ -16,7 +16,10 @@ The target is spec section 3. This file tracks what exists today; `[x]` means bu
  +-------------------v---------------------+
  | [ ] otel-agent DaemonSet (M4)           |
  +-----------------------------------------+
- ZONE: backends (ns monitoring)   [ ] Prometheus "kps" (M2)  [ ] Tempo, Loki (M3)  [ ] Grafana (M2/M5)
+ ZONE: backends (ns monitoring)   [x] Prometheus "kps" 3.14.0: OTLP receiver, exemplars, 12h (M2)
+                                  [x] Alertmanager: page / ticket -> Mailpit, Watchdog -> null (M2)
+                                  [x] Grafana 13.2.2 (datasources for Tempo/Loki pre-provisioned) (M2)
+                                  [ ] Tempo, Loki (M3)   [ ] kube-state-metrics (D-14)
  TRUST BOUNDARY: customer egress  [ ] export overlay + customer-sim + proxy-sim (M7)
 
  Runtime: kind "freightline", 1 node, Kubernetes v1.36.4, containerd 2.3.4 (Tier A)
@@ -27,9 +30,9 @@ The target is spec section 3. This file tracks what exists today; `[x]` means bu
 | Signal | Emitted by | Transport today | Target path (milestone) |
 |---|---|---|---|
 | Traces | orders (OTel Go SDK + otelhttp + otelpgx), inventory (FastAPI instrumented in code; psycopg via `opentelemetry-instrument`) | OTLP/gRPC to `otel-gateway.observability:4317`, **not listening yet**, so spans are dropped | gateway → Tempo (M3/M4) |
-| Metrics | same SDKs: `http.server.request.duration` (s), DB client metrics | same as traces | gateway → Prometheus OTLP receiver (M2/M4) |
+| Metrics | same SDKs, every 15 s: `http.server.request.duration` (s) with `http.route`, DB client metrics | same as traces | gateway → `http://kps-prometheus.monitoring:9090/api/v1/otlp` (receiver live since M2; the gateway arrives in M4). In PromQL: `http_server_request_duration_seconds_*{job="freightline/<svc>", instance="<pod uid>"}` plus promoted labels `service_version`, `deployment_environment_name`, `freightline_pod_template_hash` (`k8s_namespace_name`, `k8s_pod_name` arrive with the gateway's `k8s_attributes`); other resource attributes on `target_info` |
 | Logs | stdout JSON with `trace_id`, `span_id`, lowercase `level` | container runtime log files on the node | agent `file_log` → gateway → Loki (M3/M4) |
-| Alerts | — | — | Alertmanager → Mailpit `page@` / `ticket@` (M2/M6) |
+| Alerts | kps rules (M2), Sloth rules (M6) | Alertmanager: `severity="page"` → `page@lab.local`, everything else → `ticket@lab.local`, `Watchdog` → `null`, via `mailpit.freightline:1025` | done (routing verified M2) |
 
 ## App contract (set only by the library chart)
 

@@ -57,6 +57,9 @@ grafana:
   sidecar:
     datasources:
       exemplarTraceIdDestinations: { datasourceUid: tempo, traceIdLabelName: trace_id }
+      # $__rate_interval is derived from this. OTLP pushers send every 15 s
+      # (OTEL_METRIC_EXPORT_INTERVAL in the library chart), not the 30 s scrape default.
+      defaultDatasourceScrapeInterval: 15s
   additionalDataSources:
     - name: Tempo
       uid: tempo
@@ -85,3 +88,18 @@ kubeEtcd: { enabled: false }
 kubeControllerManager: { enabled: false }
 kubeScheduler: { enabled: false }
 kubeProxy: { enabled: false }
+
+# Cardinality (NFR: < 50,000 active series for the whole lab). Measured on first install:
+# 43,860 series, 25,268 of them from the apiserver job; the two Freightline services were ~1,000.
+# The histograms dropped below feed no kps rule or dashboard (grep of the 91.5.1 templates: 0 refs).
+# metricRelabelings is a LIST, so setting it replaces the chart default: the first rule restates
+# that default (thin out apiserver/etcd duration buckets), the second is ours.
+kubeApiServer:
+  serviceMonitor:
+    metricRelabelings:
+      - action: drop   # chart default, restated
+        regex: (etcd_request|apiserver_request_slo|apiserver_request_sli|apiserver_request)_duration_seconds_bucket;(0\.15|0\.2|0\.3|0\.35|0\.4|0\.45|0\.6|0\.7|0\.8|0\.9|1\.25|1\.5|1\.75|2|3|3\.5|4|4\.5|6|7|8|9|15|20|40|45|50)(\.0)?
+        sourceLabels: [__name__, le]
+      - action: drop   # lab addition: unused high-cardinality histograms
+        regex: (apiserver_request_body_size_bytes|etcd_request_duration_seconds|apiserver_watch_list_duration_seconds|apiserver_response_sizes|apiserver_watch_cache_read_wait_seconds|apiserver_watch_events_sizes|apiserver_request_duration_seconds|apiserver_admission_controller_admission_duration_seconds)_bucket
+        sourceLabels: [__name__]

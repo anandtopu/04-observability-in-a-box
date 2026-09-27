@@ -1,0 +1,18 @@
+$ query: http_server_request_duration_seconds_count{job=~"freightline/.*"}
+deployment_environment_name=kind freightline_pod_template_hash=59c778f656 http_request_method=POST http_response_status_code=201 http_route=/v1/reservations instance=1a61b776-c5c3-421d-b838-c08e8a2ccfbc job=freightline/inventory network_protocol_version=1.1 service_version=0.2.3 url_scheme=http
+deployment_environment_name=kind freightline_pod_template_hash=59c778f656 http_request_method=POST http_response_status_code=409 http_route=/v1/reservations instance=1a61b776-c5c3-421d-b838-c08e8a2ccfbc job=freightline/inventory network_protocol_version=1.1 service_version=0.2.3 url_scheme=http
+deployment_environment_name=kind freightline_pod_template_hash=5774fd6997 http_request_method=POST http_response_status_code=202 http_route=/v1/orders instance=99881ea2-90ba-48d2-b7de-5d0151b87d52 job=freightline/orders network_protocol_name=http network_protocol_version=1.1 server_address=localhost server_port=18080 service_version=0.2.3 url_scheme=http
+deployment_environment_name=kind freightline_pod_template_hash=5774fd6997 http_request_method=GET http_response_status_code=200 http_route=/v1/orders/{id} instance=99881ea2-90ba-48d2-b7de-5d0151b87d52 job=freightline/orders network_protocol_name=http network_protocol_version=1.1 server_address=localhost server_port=18080 service_version=0.2.3 url_scheme=http
+deployment_environment_name=kind freightline_pod_template_hash=5774fd6997 http_request_method=POST http_response_status_code=202 http_route=/v1/orders instance=99881ea2-90ba-48d2-b7de-5d0151b87d52 job=freightline/orders network_protocol_name=http network_protocol_version=1.1 server_address=orders.freightline server_port=8080 service_version=0.2.3 url_scheme=http
+deployment_environment_name=kind freightline_pod_template_hash=5774fd6997 http_request_method=POST http_response_status_code=400 http_route=/v1/orders instance=99881ea2-90ba-48d2-b7de-5d0151b87d52 job=freightline/orders network_protocol_name=http network_protocol_version=1.1 server_address=localhost server_port=18080 service_version=0.2.3 url_scheme=http
+
+$ query: sum by (job) (rate(http_server_request_duration_seconds_count{job=~"freightline/.*"}[2m]))
+freightline/inventory 0 req/s
+freightline/orders 3.6333333333333333 req/s
+
+$ query: target_info{job=~"freightline/.*"}  (resource attributes that were NOT promoted)
+freightline/inventory instance=1a61b776-c5c3-421d-b838-c08e8a2ccfbc sdk=python
+freightline/orders instance=99881ea2-90ba-48d2-b7de-5d0151b87d52 sdk=go
+
+$ query_exemplars: http_server_request_duration_seconds_bucket{job="freightline/orders"} (last 5m)
+5 exemplars; first: trace_id=777f5ccc41301713f5f2b9d13f967c79 span_id=3feab831ba594c38 value=0.008437685s

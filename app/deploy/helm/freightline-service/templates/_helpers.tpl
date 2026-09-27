@@ -30,6 +30,10 @@ never name a backend: where telemetry goes is the gateway's decision (ADR-P04-1)
 # counters "reset" and rate() spikes (spec section 12). Prometheus maps it to `instance`.
 - name: OTEL_RESOURCE_ATTRIBUTES
   value: "service.namespace=freightline,deployment.environment.name={{ .root.Values.global.environment }},service.version={{ .svc.image.tag }},service.instance.id=$(POD_UID),freightline.pod_template_hash=$(POD_TEMPLATE_HASH)"
+# Push metrics every 15 s (SDK default 60 s). With 60 s, freshness cannot meet the < 30 s NFR
+# and a rate(...[2m]) window holds only two samples (M2 finding). Grafana's datasource is told 15 s.
+- name: OTEL_METRIC_EXPORT_INTERVAL
+  value: "15000"
 # Histogram samples keep the trace ID of a sampled request: the metric -> trace hop (FR-4).
 - name: OTEL_METRICS_EXEMPLAR_FILTER
   value: trace_based

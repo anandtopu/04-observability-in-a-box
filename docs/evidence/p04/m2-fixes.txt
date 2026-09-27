@@ -1,0 +1,15 @@
+== M2 fixes, verified 2026-09-27T19:32:52Z
+1. export interval (target_info samples, last 90s):
+   freightline/orders: 19:31:32 19:31:47 19:32:02 19:32:17 19:32:32 19:32:47
+   freightline/inventory: 19:31:32 19:31:47 19:32:02 19:32:17 19:32:32 19:32:47
+2. orders series labels (server_address/server_port must be absent):
+   series with server_address from the new pod: 0
+3. active series (series with a live sample; budget < 50,000):
+   total: 38758
+   apiserver job: 25302  (was 25268)
+   freightline jobs: 468
+3. active series after the apiserver drop (19:37:32; reload 19:32:18 + 5 min lookback):
+   total: 24031   (first install: 43,860; budget < 50,000)
+   apiserver job: 10842   (was 25,268)
+   freightline jobs: 74
+   note: kube-state-metrics is not installed yet (D-14); it will add series in M5.

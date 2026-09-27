@@ -21,3 +21,22 @@ spec:
   ingress:
     - from:
         - podSelector: {}
+---
+# Alertmanager (ns monitoring) -> Mailpit SMTP. Without this the default-deny drops the SMTP
+# connection: alerts fire in Alertmanager but no email ever arrives (spec section 12).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-alertmanager-to-mailpit
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: mailpit }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: monitoring }
+          podSelector:
+            matchLabels: { app.kubernetes.io/name: alertmanager }
+      ports:
+        - { protocol: TCP, port: 1025 }

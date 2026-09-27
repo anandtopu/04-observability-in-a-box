@@ -1,0 +1,11 @@
+$ kubectl -n monitoring get pod prometheus-kps-prometheus-0 -o jsonpath='{.spec.containers[?(@.name=="prometheus")].args}'
+["--config.file=/etc/prometheus/config_out/prometheus.env.yaml"
+"--web.enable-lifecycle"
+"--web.enable-remote-write-receiver"
+"--web.enable-otlp-receiver"
+"--enable-feature=exemplar-storage"
+"--web.external-url=http://kps-prometheus.monitoring:9090"
+"--web.route-prefix=/"
+"--storage.tsdb.path=/prometheus"
+"--storage.tsdb.wal-compression"
+"--web.config.file=/etc/prometheus/web_config/web-config.yaml"]
