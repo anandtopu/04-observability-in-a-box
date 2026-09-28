@@ -391,3 +391,65 @@ One section per milestone, in the template from `docs/CLOUD_BUILD_PROMPT.md`. Nu
 2. The 250 ms stat is exact: `le="0.25"` is a real bucket boundary, so "requests ≤ 0.25 s" is a counted fact. p99 comes from `histogram_quantile`, which assumes an even distribution inside the bucket that holds the 99th percentile and interpolates, so it can be off by up to the bucket width (0.1–0.25 s here). That's why the SLO is 250 ms, not 300 ms.
 3. Flow's "p99 by span" (Tempo span metrics) shows `UPDATE` latency per span name across all requests. It tells you *which operation* is slow in aggregate. The trace shows *this* request's chain (orders waiting on inventory waiting on Postgres) and leads to its logs, and aggregates can't show causality inside one request. Exemplars connect the two views.
 </details>
+
+## M6 — SLOs and burn-rate alerts   (2026-09-28, session 1, tier A)
+
+**Goal / requirement served:** FR-6 (SLO specs in Git generate multi-window multi-burn-rate rules with separate page and ticket routes), ADR-P04-4 (Sloth in CI, no controller in the cluster), success criterion 3 (a 50% burst pages within 5 minutes; a steady 0.1% never pages in 2 hours).
+
+**What we built:**
+- `deploy/observability/slo/orders.yaml`: Sloth `PrometheusServiceLevel` with **availability 99.9%** and **latency 99% within 250 ms** for `freightline/orders`. Availability's `errorQuery` has `or vector(0)` (D-25).
+- `deploy/observability/slo/generated/orders.rules.yaml`: the generated PrometheusRule **`freightline-orders`** (34 rules: 8 SLI recordings + 7 meta recordings + 2 alerts per SLO), committed.
+- `tests/slo-burn.test.yaml`: promtool cases for the burn maths; `tests/promtool-rules.sh` runs them with the FR-8 cases.
+- `tests/burn-tests.sh`: the live slow, fast and latency burns, faults set through Helm values, alert and email timing.
+- orders **0.2.6**: `FAULT_LATENCY_RATE` / `FAULT_LATENCY_MS` (the latency counterpart of P03's `FAULT_5XX_RATE`).
+- `docs/runbooks/slo-burn.md`, `docs/runbooks/queue-filling.md`: the targets of every alert's `runbook_url` (§8).
+
+**How the data flows:**
+- `http_server_request_duration_seconds_{count,bucket}` (OTLP, every 15 s) → Sloth's **SLI recording rules** compute the error ratio over 5m, 30m, 1h, 2h, 6h, 1d, 3d (`slo:sli_error:ratio_rateX`). Availability: 5xx / all. Latency: (all − `le="0.25"`) / all, exact because 0.25 is a bucket boundary.
+- **Meta rules** turn ratios into budget: `slo:objective:ratio`, `slo:error_budget:ratio` (0.001 / 0.01), `slo:current_burn_rate:ratio`, `slo:period_error_budget_remaining:ratio` (30 d).
+- **Alerts:** page = (5m > 14.4·b AND 1h > 14.4·b) OR (30m > 6·b AND 6h > 6·b); ticket = (2h > 3·b AND 1d > 3·b) OR (6h > b AND 3d > b). The long window says how much budget is gone; the short window says it's *still* burning, so a fixed problem stops paging.
+- Alertmanager (M2) routes on `severity`: page → `page@lab.local`, ticket → `ticket@lab.local`, each on its own route (own group, own `group_wait` 30 s).
+
+**Commands run, in order:**
+
+| Command | What it does | Key output |
+|---|---|---|
+| `sloth generate -i …/orders.yaml -o …/generated/orders.rules.yaml` | Generates rules | PrometheusRule `freightline-orders`, 34 rules; `(errors or vector(0)) / (total)`, correctly parenthesised |
+| `bash tests/promtool-rules.sh` | `check rules` + unit tests | 4 + 34 rules OK; pipeline and SLO tests `SUCCESS` (`docs/evidence/p04/m6-rule-tests.txt`) |
+| `kubectl apply -f deploy/observability/slo/generated/` + the spec's gate | Loads the rules | `freightline-orders` listed (`m6-gate.txt`); alert groups `inactive/ok` |
+| `bash tests/burn-tests.sh` (background, 04:14–04:54) | Live burns at 10 req/s in-cluster | see Verification (`m6-burn-tests.txt`) |
+| poll `ALERTS` until 05:09 | Verifies the resolve explanation | page resolved at 05:09:16 |
+
+**Verification:**
+- *Spec gate:* `kubectl -n monitoring get prometheusrule freightline-orders` lists the rule. **PASS.**
+- *§7 burn tests, live (10 req/s):*
+
+| Test | Fault | Result | Criterion |
+|---|---|---|---|
+| Slow burn (shortened, D-26) | `FAULT_5XX_RATE=0.001` for 20 min | **0 pages in 80 checks**; 5m and 1h ratios 0.001 (1×); no page email | no page ✔ |
+| Fast burn | `FAULT_5XX_RATE=0.5` | page **firing after 60 s** (1h ratio 0.015 > 0.0144); **email after 90 s** (`group_wait`); ticket too | < 5 min ✔ |
+| Fast burn, resolve | fix at 04:38:53 | 5m ratio 0 within minutes; page **resolved at 05:09:16 (30 m 23 s)**, held by the 6×/6 h/30 m pair until the burst left the 30 m window | explained, measured |
+| Latency burn | every request +300 ms | page **firing after 211 s** via the 6×/30 m/6 h pair (30m 0.101, 6h 0.065 > 0.06); **email after 236 s** | page ✔ (earlier than the 8.6-min formula, see below) |
+
+- *§7 burn tests, promtool (full length):* 50% pages within 5 min; 2% doesn't page at 30 min but pages by 50 (formula 43); latency pages after about 8.6 min, not at 5; **steady 0.1% never pages over 9 h of simulated time**; a healthy SLO reads 0.
+
+**What broke and how we fixed it:**
+1. *A healthy SLO would have read "absent".* With no 5xx, Sloth's error query has no series. Added `or vector(0)`; verified Sloth wraps the error query in parentheses, so `/` doesn't bind first; unit-tested.
+2. *The spec's detection maths assumes full windows.* My first promtool run (1 h of clean history) paged 2% errors before 30 minutes, and the latency burn at 5 minutes. The 6×/6 h/30 m pair fires when the 6 h window holds little history. With 6 h of clean history the formula holds. The live run showed the same effect: the lab's history is sparse (bursts of k6), so the latency page came at 211 s rather than about 9 minutes, and the availability page held for 30 minutes after the fix. **Burn-rate alerting assumes steady traffic; in quiet periods short bursts dominate the long windows.**
+3. *Steady 0.1% opens a ticket.* Exactly 1× burn against the 1× threshold `1 × (1 − 0.999)` = 0.00099999999999994. The spec only forbids a page, and a 1× ticket is the designed response ("you'll spend the whole budget this month"). Documented, not asserted.
+4. *The burn script's email check stopped at the ticket email,* which arrives first, and reverted the fault before the page email's `group_wait`. The page email was confirmed by hand (04:54:55); the script now waits for `page@`.
+5. *promtool rejected `promql_exp_test`.* The key is `promql_expr_test`. Unknown keys fail loudly, which is what you want from a test runner.
+
+**Lab vs customer environment:** at Cobalt, the SLO spec is the artefact the CAB reviews, and the generated rule diff is the evidence. They'll want the page route to go to *their* incident tool (not Opsgenie, which shuts down 2027-04-05) and the ticket route to their ITSM queue. Real traffic is steadier than a lab's, so the burn maths behaves as designed, but low-traffic services (nights, weekends) show the same quiet-period effect we measured. Common mitigations are a minimum-request guard on the page (e.g. `and sum(rate(…_count[1h])) > 1`) or a longer latency SLO window. Northstar would use Datadog SLOs over the same metrics; the Sloth spec documents the intent either way.
+
+**Check yourself:**
+1. After the fix, the 5 m ratio was 0 within minutes, but the page stayed firing for 30 minutes. Which pair held it, and what would have made it clear sooner?
+2. Why does a steady 0.1% error rate never page but can open a ticket, and why is that the *right* behaviour?
+3. The latency page fired after 3.5 minutes instead of the formula's 8.6. Is the formula wrong?
+
+<details><summary>answers</summary>
+
+1. The second page pair: 30m > 6·b AND 6h > 6·b. The 30 m window still held the 1.6-minute 50% burst (ratio about 0.03 > 0.006), and the 6 h window held so little lab traffic that the burst dominated it too (0.019). It cleared when the burst left the 30 m window (30 m 23 s). With steady traffic filling the 6 h window, the burst would have been about 0.2% of it, below 0.6%, and the page would have cleared with the 5 m window.
+2. 0.1% errors against a 99.9% objective is exactly 1× burn: you'll spend exactly the whole monthly budget. That's not an emergency (nothing about the next hour is worse than planned), so no page. It *is* worth a ticket, because there's no headroom left for anything else this month. Paging on it would teach on-call to ignore pages.
+3. No. The formula `60 × 14.4 / B` describes the *first* pair (1 h and 5 m) starting from a clean, **full** history. Here the *second* pair (6 h and 30 m at 6×) fired first, because the 6 h window held only sparse lab traffic. With 6 hours of steady history (the promtool case), the latency page fires between 5 and 12 minutes, as the formula predicts.
+</details>

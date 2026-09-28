@@ -1,0 +1,25 @@
+04:14:01 == setup: clear Mailpit, start in-cluster k6 at 10 req/s for 90 min
+04:14:04 faults now: FAULT_5XX_RATE=0 FAULT_LATENCY_RATE=0 FAULT_LATENCY_MS=0 (orders pod ready)
+04:17:04 == phase 1: slow burn, 0.1% errors (1x) for 20 min: must NOT page
+04:17:10 faults now: FAULT_5XX_RATE=0.001 FAULT_LATENCY_RATE=0 FAULT_LATENCY_MS=0 (orders pod ready)
+04:37:11 slow burn result: page firing in 0 of 80 checks; ratios 5m=0.001 1h=0.001; page mails: []
+04:37:11 == phase 2: fast burn, 50% errors (500x): page expected < 5 min
+04:37:16 faults now: FAULT_5XX_RATE=0.5 FAULT_LATENCY_RATE=0 FAULT_LATENCY_MS=0 (orders pod ready)
+04:38:16 fast burn: OrdersAvailabilityBurn page FIRING after 60s in Prometheus (ratios 5m=0.068 1h=0.015)
+04:38:46 fast burn: page email after 90s, recipients: [ticket@lab.local,page@lab.local]
+04:38:46 == fix: FAULT_5XX_RATE=0, time until the page resolves
+04:38:53 faults now: FAULT_5XX_RATE=0 FAULT_LATENCY_RATE=0 FAULT_LATENCY_MS=0 (orders pod ready)
+04:50:53 fast burn: page RESOLVED nones after the fix (ratios 5m=0 1h=0.024)
+04:50:53 ticket for availability firing now: 1
+04:50:53 == phase 3: latency burn, every orders request +300 ms (100x): page expected ~9 min
+04:50:59 faults now: FAULT_5XX_RATE=0 FAULT_LATENCY_RATE=1 FAULT_LATENCY_MS=300 (orders pod ready)
+04:54:30 latency burn: OrdersLatencyBurn page FIRING after 211s (ratios 5m=0.602 30m=0.101 1h=0.076 6h=0.065)
+04:54:30 latency burn: page email recipients: [ticket@lab.local]
+04:54:35 faults now: FAULT_5XX_RATE=0 FAULT_LATENCY_RATE=0 FAULT_LATENCY_MS=0 (orders pod ready)
+04:54:35 == Mailpit inbox at the end
+   04:52:25 to=ticket@lab.local [FIRING:1] OrdersLatencyBurn (freightline monitoring/kps-prometheus ticket orders-requests-latency orders ticket requests-latency 1)
+   04:38:37 to=ticket@lab.local [FIRING:1] OrdersAvailabilityBurn (freightline monitoring/kps-prometheus ticket orders-requests-availability orders ticket requests-availability 1)
+   04:38:37 to=page@lab.local [FIRING:1] OrdersAvailabilityBurn (freightline monitoring/kps-prometheus page orders-requests-availability orders page requests-availability 1)
+04:54:35 == done
+04:54:55 (checked by hand after the script: its email wait stopped at the ticket) latency PAGE email to=page@lab.local, 236s after the fault went live at 04:50:59
+05:09:16 availability page firing=0 (30m ratio 0; fix went live 04:38:53)

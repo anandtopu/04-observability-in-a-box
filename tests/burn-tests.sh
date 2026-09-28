@@ -10,7 +10,9 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 PROM=http://localhost:9090; MAIL=http://localhost:18025
-SLOW_MIN=${SLOW_MIN:-20}; FAST_MAX_MIN=${FAST_MAX_MIN:-8}; RESOLVE_MAX_MIN=${RESOLVE_MAX_MIN:-12}; LAT_MAX_MIN=${LAT_MAX_MIN:-20}
+# RESOLVE_MAX_MIN 35: after a fix the 6x pair (6h AND 30m) can hold a page until the burst leaves
+# the 30m window; in the lab's sparse history it did (first run: still firing 12 min after the fix).
+SLOW_MIN=${SLOW_MIN:-20}; FAST_MAX_MIN=${FAST_MAX_MIN:-8}; RESOLVE_MAX_MIN=${RESOLVE_MAX_MIN:-35}; LAT_MAX_MIN=${LAT_MAX_MIN:-20}
 ts() { date -u +%H:%M:%S; }
 say() { echo "$(ts) $*"; }
 
@@ -54,8 +56,9 @@ say "slow burn result: page firing in $pages of $(( SLOW_MIN * 4 )) checks; rati
 say "== phase 2: fast burn, 50% errors (500x): page expected < 5 min"
 set_faults 0.5 0 0; start=$(date +%s)
 t=$(wait_for OrdersAvailabilityBurn page 1 "$FAST_MAX_MIN"); say "fast burn: OrdersAvailabilityBurn page FIRING after ${t}s in Prometheus (ratios 5m=$(ratio requests-availability 5m) 1h=$(ratio requests-availability 1h))"
-for _ in $(seq 12); do m=$(mails 'OrdersAvailabilityBurn'); [ -n "$m" ] && break; sleep 10; done
-say "fast burn: page email after $(( $(date +%s) - start ))s, recipients: [$m]"
+# Wait for the PAGE email specifically (the ticket often arrives first; first run stopped at it).
+for _ in $(seq 12); do m=$(mails 'OrdersAvailabilityBurn'); [[ "$m" == *page@* ]] && break; sleep 10; done
+say "fast burn: page email after $(( $(date +%s) - start ))s, recipients so far: [$m]"
 say "== fix: FAULT_5XX_RATE=0, time until the page resolves"
 set_faults 0 0 0; start=$(date +%s)
 t=$(wait_for OrdersAvailabilityBurn page 0 "$RESOLVE_MAX_MIN"); say "fast burn: page RESOLVED ${t}s after the fix (ratios 5m=$(ratio requests-availability 5m) 1h=$(ratio requests-availability 1h))"
@@ -64,8 +67,8 @@ say "ticket for availability firing now: $(firing OrdersAvailabilityBurn ticket)
 say "== phase 3: latency burn, every orders request +300 ms (100x): page expected ~9 min"
 set_faults 0 1 300; start=$(date +%s)
 t=$(wait_for OrdersLatencyBurn page 1 "$LAT_MAX_MIN"); say "latency burn: OrdersLatencyBurn page FIRING after ${t}s (ratios 5m=$(ratio requests-latency 5m) 30m=$(ratio requests-latency 30m) 1h=$(ratio requests-latency 1h) 6h=$(ratio requests-latency 6h))"
-for _ in $(seq 12); do m=$(mails 'OrdersLatencyBurn'); [ -n "$m" ] && break; sleep 10; done
-say "latency burn: page email recipients: [$m]"
+for _ in $(seq 12); do m=$(mails 'OrdersLatencyBurn'); [[ "$m" == *page@* ]] && break; sleep 10; done
+say "latency burn: page email after $(( $(date +%s) - start ))s, recipients so far: [$m]"
 set_faults 0 0 0
 
 say "== Mailpit inbox at the end"
