@@ -60,7 +60,7 @@ the Python SDK costs 17% CPU at 100 req/s, over our 5% budget, and I can tell yo
 | What | Measured | Target | Evidence |
 |---|---|---|---|
 | Fault → page (game day, 100 req/s) | 332 s (pool 2 + 30 ms hold); 110 s (blind fault, 120 ms slow query) | page < 5 min | `m8-gameday.txt` |
-| Alert → exemplar → trace → logs (game day) | run 1: fresh agent 52 s but the wrong incident; owner right path in 4 steps, not finished. Rerun after the span-log fix: fresh agent **~42 s, right cause**; owner stopped at step 2 | < 2 min per person | `m8-gameday.txt` (**not met** as written: two humans) |
+| Alert → exemplar → trace → logs (game day) | run 1: fresh agent 52 s but the wrong incident; owner right path in 4 steps, not finished. Rerun after the span-log fix: fresh agent **~42 s, right cause**; owner stopped at step 2. Rerun 2 (+ 5xx panel): agent **~56 s, right cause** via the failing span's own log line | < 2 min per person | `m8-gameday.txt` (**not met** as written: two humans) |
 | Freshness, customer sink | 0.8–1.0 s | < 60 s | `m8-sink-freshness.txt` |
 | Active series at 100 req/s | 22,393 live (head 47,321 with churn) | < 50,000 | `m8-chaos.txt` |
 | Export parity (Loki vs Splunk exporter) | 36,034 = 36,034 | within 0.1% | `m7-sink-outage.txt` |

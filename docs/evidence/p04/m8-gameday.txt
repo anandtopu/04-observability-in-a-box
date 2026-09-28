@@ -160,3 +160,26 @@
      rate=0.2 with the span's own span_id; visible without any click in the RED 'Warnings and errors' panel (step 2 screenshot)
    gate: participant 2 (agent) reached the failing span's logs with the right cause in ~42 s; one human run incomplete
      -> still NOT MET as specified (two people who didn't build the stack)
+
+== RERUN 2 with the Failing requests (5xx) panel (0.2.9 + filterBySpanID + new RED panel), blind
+   18:42:56 load 100 req/s; windows clean 19:12:33   19:12:38 injected   19:15:25 page OrdersLatencyBurn (t+170 s)
+   fault revealed after the drill: C, inventory FAULT_DB_SLOW_MS=120
+
+   participant 2 (rerun 2, fresh agent, not a human; same cold brief)
+     launched 19:15:38.1 (page email 19:15:25, fault injected 19:12:38)
+     19:15:54 password + dashboards/datasources   16 s
+     19:15:59 RED latency p50/p99 panel + query   21 s
+     19:16:06 recent exemplar above 250 ms: 0.303 s @ 19:13:56, trace 2434bf62...   28 s
+     19:16:13 trace opened; failing span: orders HTTP POST 300.45 ms ERROR "context deadline exceeded"   35 s
+     19:16:34 log line for that span (span_id 63e9baad4b2246cc): warn "inventory call failed ... elapsed_ms 300"   ~56 s
+     diagnosis: CORRECT (inventory POST /v1/reservations ~1.5 s incl. SELECT pg_sleep; orders' 300 ms timeout fires)
+     friction it reported: no SLO dashboard / panel link from the alert; server span not marked error; old slowest
+       exemplars (had to check timestamps, as the runbook now says); base64 vs hex ids via raw API; inventory span
+       has ~1.39 s not covered by child spans (time waiting for a pool connection is not a span); claimed PII fields are
+       "stream labels" -- WRONG, they are structured metadata (verified in run 1), in-cluster Loki by design
+     used the new 5xx panel: no (correctly noted a latency incident has no 5xx)
+
+   participant 1 (owner, remote, relayed), clock start 19:15:53: step 1 19:17:54 RED dashboard, last 15 min (+121 s);
+     the owner ended the drill there to commit and close: NOT COMPLETED (1 step)
+   note: the new 5xx panel showed inventory's own 503s (PoolTimeout) as dots at ~2 s: a second route to the cause
+   gate: two agent runs with the right cause in < 1 min (~42 s, ~56 s); no completed human run -> NOT MET as written
