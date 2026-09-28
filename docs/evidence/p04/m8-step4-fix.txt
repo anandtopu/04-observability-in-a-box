@@ -1,0 +1,31 @@
+== M8 game day, step 4 fix: "Logs for this span" on the failing HTTP POST span
+problem (participant 1, step 4, 16:56): the span menu offered only "Logs for this trace" (tracesToLogsV2 had
+filterByTraceID only), and no log line carried the HTTP POST span's span_id: orders logged the failure
+("inventory precheck degraded") after the call returned, in the ROOT span's context. Span-level filtering
+alone would therefore have returned nothing.
+
+fix:
+  app/services/orders/internal/api/api.go   spanLogTransport under otelhttp's transport: logs
+      "inventory call failed" (err or 5xx, elapsed_ms) with req.Context(), which carries the client span
+  app/services/orders/internal/api/transport_test.go   asserts span_id == the HTTP POST span's
+  deploy/observability/kps-values.yaml      tracesToLogsV2.filterBySpanID: true  (kps revision 4)
+  images 0.2.9 (freightline revision 42+)
+
+unit test:  go test ./internal/api/ -> PASS
+negative control: same test with the line logged without the request context ->
+  FAIL "want span_id 6d5b27bccab8f2a5 (the client span), got span_id <nil>"   (the test can fail)
+grafana datasource after the upgrade (GET /api/datasources/uid/tempo):
+  {"datasourceUid":"loki","filterBySpanID":true,"filterByTraceID":true,"spanEndTimeShift":"5m",...}
+
+live check (fault C: inventory FAULT_DB_SLOW_MS=120, 100 req/s, 17:22:57):
+  Tempo: {orders HTTP POST, status=error} -> trace 19d843b353190a72b9171965efdc9ccc, span 7af84f2076dfc063 (300.2 ms)
+  Loki {service_name="orders"} | span_id="7af84f2076dfc063" ->
+    {"level":"warn","msg":"inventory call failed","url":"/v1/reservations","err":"context deadline exceeded",
+     "elapsed_ms":300,"trace_id":"19d843b353190a72b9171965efdc9ccc","span_id":"7af84f2076dfc063"}
+  UI (headless Chromium, the click matched ONLY the label /^logs for this span$/): button present and clicked;
+    Grafana's query: ... trace_id="19d843b3..." | ... span_id="7af84f2076dfc063"; 1 line displayed, the WARN
+    "inventory call failed" at the top (no scrolling)  -> m8-step4-fixed.png
+  side effect checked: inventory's log span_id 0732a023330496f9 ("stock reserved") = its server span
+    POST /v1/reservations (Tempo ids are base64: decoded) -> "Logs for this span" works on inventory spans too;
+    participant 2's "span_id not in the trace" was an undecoded-id mistake
+restore: fault off, k6 stopped; orders and inventory 0.2.9 with 0 FAULT_* set

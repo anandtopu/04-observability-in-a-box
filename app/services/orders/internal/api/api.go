@@ -58,7 +58,27 @@ type InventoryClient struct {
 // NewInventoryClient returns a client whose transport injects traceparent and records a
 // client span per call, so inventory's server span becomes a child of orders' span.
 func NewInventoryClient(base string) *InventoryClient {
-	return &InventoryClient{base: base, http: &http.Client{Transport: otelhttp.NewTransport(http.DefaultTransport)}}
+	return &InventoryClient{base: base, http: &http.Client{Transport: otelhttp.NewTransport(spanLogTransport{http.DefaultTransport})}}
+}
+
+// spanLogTransport sits under otelhttp's transport, so each request's context already carries the
+// "HTTP POST" client span: a failure logged here gets that span's span_id, and Grafana's "Logs for
+// this span" on the failing span finds it. Logged after the call returns (the degraded warning in
+// reserve), the line would carry the parent's span_id and the span would show no logs (M8 game day).
+type spanLogTransport struct{ base http.RoundTripper }
+
+func (t spanLogTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	start := time.Now()
+	resp, err := t.base.RoundTrip(req)
+	switch {
+	case err != nil:
+		slog.WarnContext(req.Context(), "inventory call failed", "url", req.URL.Path, "err", err,
+			"elapsed_ms", time.Since(start).Milliseconds())
+	case resp.StatusCode >= 500:
+		slog.WarnContext(req.Context(), "inventory call failed", "url", req.URL.Path, "status", resp.StatusCode,
+			"elapsed_ms", time.Since(start).Milliseconds())
+	}
+	return resp, err
 }
 
 var errOutOfStock = errors.New("out of stock")

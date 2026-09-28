@@ -88,5 +88,8 @@ the Python SDK costs 17% CPU at 100 req/s, over our 5% budget, and I can tell yo
   traps are real. Pick exemplars inside the burn window (the agent took the slowest of 30 minutes, which
   predated the incident). An unresolved page swallows the next incident's email (Alertmanager dedup,
   12 h repeat). Right after a Prometheus restart, "no alerts" doesn't mean clean SLO windows.
+- **Log a failure in the span that failed.** The game day's owner reached the right span and clicked its logs, but the
+  failure had been logged in the parent's context, so only trace-level logs existed and the answer was one scroll
+  away. Logging inside the client span plus `filterBySpanID` turned it into a one-line result (D-38).
 - **Make the game-day fault realistic up front**: a pool of 2 alone didn't hurt P04-lite (its query holds
   a connection for a few ms); exhaustion needs a small pool *and* a slow query (D-36).

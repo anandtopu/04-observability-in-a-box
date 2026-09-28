@@ -10,7 +10,10 @@ PF_DIR=${PF_DIR:-/tmp/p04-pf}; K6_MIN=${1:-120}
 say() { echo "$(date -u +%H:%M:%S) $*"; }
 
 bash scripts/cloud-setup.sh 2>&1 | grep -E "dockerd|BLOCKED"
-docker start freightline-control-plane >/dev/null
+# cloud-setup.sh returns as soon as dockerd is launched; its socket can take a few seconds to accept
+# (M8: `docker start` raced it and the node never came up). Wait, then start the node.
+until docker info >/dev/null 2>&1; do sleep 1; done
+docker start freightline-control-plane >/dev/null || { say "docker start FAILED"; exit 1; }
 until kubectl get nodes 2>/dev/null | grep -q " Ready"; do sleep 3; done; say "node Ready"
 # Right after a restart kubelet reports "services have not yet been read" and the scheduler may lose its
 # lease once: both clear on their own. Wait until every pod (except old k6 runs) is Ready.

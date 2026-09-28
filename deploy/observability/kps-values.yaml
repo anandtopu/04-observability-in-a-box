@@ -70,6 +70,10 @@ grafana:
         tracesToLogsV2:
           datasourceUid: loki
           filterByTraceID: true
+          # M8 game day: without it the span menu offers only "Logs for this trace"; with it, "Logs for this
+          # span" narrows to lines carrying that span's span_id (orders logs failed inventory calls inside the
+          # HTTP POST client span for exactly this).
+          filterBySpanID: true
           spanStartTimeShift: "-5m"
           spanEndTimeShift: "5m"
           tags: [{ key: service.name, value: service_name }]

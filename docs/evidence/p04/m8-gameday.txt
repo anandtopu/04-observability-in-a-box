@@ -131,3 +131,6 @@
      that time out waiting); log = orders warn "inventory precheck degraded" with err "context deadline exceeded".
 
 == customer sink freshness (tests/m8-sink-freshness.sh, Cobalt overlay on, then rolled back): 1.0 / 0.8 / 0.8 s
+
+== after the drill: step 4 fixed (D-38, m8-step4-fix.txt). The same click now opens "Logs for this span" on the failing
+   HTTP POST span and shows one line: "inventory call failed ... context deadline exceeded" (elapsed_ms 300).
