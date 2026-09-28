@@ -332,3 +332,62 @@ One section per milestone, in the template from `docs/CLOUD_BUILD_PROMPT.md`. Nu
 2. The receiver refuses it (`RESOURCE_EXHAUSTED`), so nothing is accepted that the gateway can't hold. The SDK retries with backoff and eventually drops. `otelcol_receiver_refused_spans` increases, and `TelemetryRefused` raises a ticket. Memory falls as queues drain and GC runs, and the pod is never OOM-killed. That's backpressure instead of a crash that would lose everything in memory.
 3. `rate()` over a series with equal samples is 0: the thing exists and is idle. With no series, the query returns nothing: the thing never reported. The idle gate needed a pod that had served requests to show 0, and `OrdersMetricsAbsent` must watch a series that exists even with no traffic (`target_info`), or it pages on every quiet restart.
 </details>
+
+## M5 — RED, USE and Flow dashboards as code   (2026-09-28, session 1, tier A)
+
+**Goal / requirement served:** FR-5 (dashboards are JSON in Git), FR-4 (exemplar → trace → logs, walked through), success criterion 2 (RED for every service and USE for every pod and the node, from one template). Deploy annotations stand in for P03's.
+
+**What we built:**
+- `deploy/observability/dashboards/generate.py`: one Python definition produces `json/{red,use,flow}.json` (reviewable) and `{red,use,flow}.yaml` (ConfigMaps labelled `grafana_dashboard: "1"`). RED is one template, with `$service` = Prometheus `job`.
+- **RED** (7 panels), **USE** (13), **Flow** (7, adapted for P04-lite, D-01a). All carry **rollout annotations** computed from `target_info`: a `(job, freightline_pod_template_hash)` pair that didn't exist 2 minutes ago is a new ReplicaSet.
+- `tests/m5-dashboard-queries.py`: fetches each dashboard *back from Grafana* and runs every panel query through `/api/ds/query`.
+- `tests/m5-walkthrough.mjs`: exemplar → trace → logs through the APIs, plus Grafana screenshots (headless Chromium).
+- Fixes found by those tests: the library chart's `replicas` (`default` turns 0 into 1), orders' DB span attributes, and Tempo's service-graph `peer_attributes` (D-24).
+
+**How the data flows (what a panel does to it):**
+- *RED rate/errors:* `sum by (job) (rate(http_server_request_duration_seconds_count{job=~"$service"}[$__rate_interval]))`. `$__rate_interval` is at least 4× the datasource step, which we told Grafana is 15 s (M2). Errors divide the 5xx subset by all. The `or … * 0` term makes "no errors" read **0%**; without it the division returns nothing and the panel says "No data".
+- *RED duration:* `histogram_quantile(0.99, sum by (job, le) (rate(…_bucket[…])))` interpolates inside buckets. With `exemplar: true`, Grafana also fetches `/api/v1/query_exemplars` and draws a dot per exemplar; its `trace_id` label links to the `tempo` datasource (M2's `exemplarTraceIdDestinations`).
+- *Latency SLI:* `…_bucket{le="0.25"} / …_count` is **exact** because 0.25 is a real bucket boundary (M1 evidence), so M6 uses 250 ms and not 300.
+- *Trace → logs:* Grafana's Tempo datasource (`tracesToLogsV2`) maps `service.name` → `service_name` and adds `| trace_id="…"`. Loki finds the lines by structured metadata inside the per-pod stream (M3).
+- *Flow:* LogQL metrics over the JSON body (`| json | msg="order accepted"`) count orders by status. Tempo's span metrics give p99 per span including SQL, and the service graph is drawn **in the browser** from `traces_service_graph_*` series.
+- *USE:* cAdvisor (kubelet) gives CPU seconds, working set and OOM events per container; node-exporter gives the node. kube-state-metrics would add requests, limits, restarts and termination reasons (D-14).
+
+**Commands run, in order:**
+
+| Command | What it does | Key output |
+|---|---|---|
+| PromQL `count(<metric>)` for each USE input | What exists today | cAdvisor CPU/working set/OOM events and node-exporter: yes. `container_spec_*` (dropped by kps), CFS (no CPU limits), `kube_*` (D-14): no |
+| `python3 deploy/observability/dashboards/generate.py` | Builds the dashboards | red 7, use 13, flow 7 panels |
+| `kubectl apply --dry-run=server -f deploy/observability/dashboards/` | Validates | 3 ConfigMaps; `generate.py` and `json/` ignored |
+| `kubectl apply -f …/dashboards/` + Grafana `/api/search?tag=freightline` | Loads | 3 dashboards in about 10 s, no import step |
+| The spec's gate | | **3** (`docs/evidence/p04/m5-gate.txt`) |
+| `python3 tests/m5-dashboard-queries.py` (during k6 load) | Every panel through Grafana | first run: 1 error, 6 empty; final: **0 errors**, all EMPTY explained (`m5-dashboard-queries.txt`) |
+| `bash app/deploy.sh --set services.inventory.replicas=0`, 3 orders, `bash app/deploy.sh` | Produces the degraded-precheck event | 3 × PENDING; the precheck, warn/error and PENDING panels light up |
+| `node tests/m5-walkthrough.mjs` | exemplar → trace → logs + screenshots | 58–73 exemplars/15 min; slowest 50.6 ms → 9-span trace (43.4 ms in inventory's `UPDATE`) → 2 log lines (`m5-walkthrough.txt`, `m5-{red,trace,logs,flow,use}.png`) |
+
+**Verification:**
+- *Spec gate:* `kubectl -n monitoring get configmap -l grafana_dashboard=1 --no-headers | grep -c freightline` → **3**. **PASS.**
+- *Walk-through (build prompt):* from the RED p99 panel's slowest exemplar (`fddccd24…`, 50.6 ms), the Tempo trace shows `POST /v1/orders` → `HTTP POST` → inventory `POST /v1/reservations` → `UPDATE` (43.35 ms, the bottleneck), and Loki returns orders' `order accepted` and inventory's `stock reserved` for that `trace_id`. **PASS**, with screenshots.
+- *Panel queries:* 27 panels, 0 errors. Expected EMPTY: 4 kube-state-metrics panels (D-14), CFS throttling (no CPU limits), DB pool exhausted (M8's event).
+
+**What broke and how we fixed it:**
+1. *Error ratio showed "No data" when healthy.* With no 5xx, the numerator has no series and `a / b` returns nothing: absent is not zero (M4's lesson again). Fix: `(errors or total * 0) / total`. The axis then read "0–10000%" on all-zero data; fixed with a 1% soft maximum.
+2. *The service graph panel returned `unsupported query type: 'serviceMap'`* through `/api/ds/query`. Not a dashboard bug: Grafana builds the map in the browser from Prometheus queries. The linter checks those series instead, and the browser screenshot shows the panel.
+3. *`--set services.inventory.replicas=0` didn't take inventory down.* The library chart used `{{ .svc.replicas | default 1 }}`, and sprig's `default` treats 0 as empty. Fix: `hasKey`. A scale-to-zero that silently doesn't happen would have broken M8's game day.
+4. *One Postgres drawn as two nodes* (`postgresql`, `postgres`): cross-language semconv drift (D-24). The first fix (`server.address`) renamed the uninstrumented caller `orders.freightline`, so the final choice is `db.system.name`, which both languages now emit.
+5. *Every screenshot was "Grafana has failed to load its application files"*, five files of identical size. I checked one instead of trusting it. The console showed `RangeError: Invalid language tag: en-US@posix`: headless Chromium inherits the VM's POSIX locale. Fix: `locale: "en-US"`.
+6. *ES modules ignore `NODE_PATH`*, so the global Playwright was invisible. Fix: `createRequire` from `npm root -g`.
+
+**Lab vs customer environment:** at Cobalt, dashboards go through the same CAB as other configuration. Generated JSON plus a Git diff *is* the change record, and `editable: false` stops drift in the UI. Their SOC watches Splunk, not Grafana, so the dashboards serve Beacon's on-call; the SOC's equivalent is a saved Splunk search over the exported logs (M7). The USE ratios need kube-state-metrics, which customers usually already run; reuse theirs rather than deploying a second one. Northstar would get Datadog dashboards from the same OTLP data; the dashboards themselves aren't portable, and that's fine, because the telemetry is.
+
+**Check yourself:**
+1. Why does the error-ratio query need `or sum(...) * 0`, and what would an on-call engineer have concluded without it?
+2. The p99 panel and the "within 250 ms" stat both come from the same histogram. Which one is exact, and why?
+3. The walk-through's slowest request spent 43 of 50 ms in inventory's `UPDATE`. Which dashboard panel would have shown you that *without* opening a trace, and why is the trace still necessary?
+
+<details><summary>answers</summary>
+
+1. With no 5xx responses, the numerator selects no series and PromQL's division has nothing to match, so the query returns no result and the panel says "No data". During an incident, "No data" on the error panel reads like a broken pipeline, the opposite of "0% errors". `or total * 0` adds a zero-valued series with the same labels when the numerator is missing.
+2. The 250 ms stat is exact: `le="0.25"` is a real bucket boundary, so "requests ≤ 0.25 s" is a counted fact. p99 comes from `histogram_quantile`, which assumes an even distribution inside the bucket that holds the 99th percentile and interpolates, so it can be off by up to the bucket width (0.1–0.25 s here). That's why the SLO is 250 ms, not 300 ms.
+3. Flow's "p99 by span" (Tempo span metrics) shows `UPDATE` latency per span name across all requests. It tells you *which operation* is slow in aggregate. The trace shows *this* request's chain (orders waiting on inventory waiting on Postgres) and leads to its logs, and aggregates can't show causality inside one request. Exemplars connect the two views.
+</details>

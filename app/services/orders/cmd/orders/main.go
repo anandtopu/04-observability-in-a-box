@@ -47,7 +47,16 @@ func main() {
 		log.Error("db config", "err", err)
 		os.Exit(1)
 	}
-	cfg.ConnConfig.Tracer = otelpgx.NewTracer() // one client span per SQL statement
+	// One client span per SQL statement. otelpgx v0.10 (pinned for Go 1.24, D-06) only sets the old
+	// db.system; inventory's Python instrumentation emits stable DB semconv. Add the stable
+	// attributes so one Postgres is one node in Tempo's service graph, not "postgresql" and
+	// "postgres" (M5 finding).
+	cfg.ConnConfig.Tracer = otelpgx.NewTracer(otelpgx.WithTracerAttributes(
+		attribute.String("db.system.name", "postgresql"),
+		attribute.String("db.namespace", cfg.ConnConfig.Database),
+		attribute.String("server.address", cfg.ConnConfig.Host),
+		attribute.Int("server.port", int(cfg.ConnConfig.Port)),
+	))
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		log.Error("db pool", "err", err)

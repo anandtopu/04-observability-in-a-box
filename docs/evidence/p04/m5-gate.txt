@@ -1,0 +1,5 @@
+$ kubectl -n monitoring get configmap -l grafana_dashboard=1 --no-headers | grep -c freightline
+3
+
+(kps ships its own dashboards with the same label:)
+total grafana_dashboard=1 ConfigMaps: 28

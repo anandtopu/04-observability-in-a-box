@@ -7,7 +7,9 @@ metadata:
   labels:
     {{- include "freightline-service.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .svc.replicas | default 1 }}
+  # Not `.svc.replicas | default 1`: sprig's default treats 0 as empty, so replicas=0 would
+  # silently render as 1 (M5 finding). hasKey keeps an explicit 0.
+  replicas: {{ if hasKey .svc "replicas" }}{{ .svc.replicas }}{{ else }}1{{ end }}
   revisionHistoryLimit: 3
   selector:
     matchLabels:

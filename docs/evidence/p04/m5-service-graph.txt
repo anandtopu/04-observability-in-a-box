@@ -1,0 +1,4 @@
+  inventory -> postgres  15.9 req/s
+  orders -> inventory  7.95 req/s
+  user -> orders  9.8 req/s
+  orders -> postgres  29.33 req/s

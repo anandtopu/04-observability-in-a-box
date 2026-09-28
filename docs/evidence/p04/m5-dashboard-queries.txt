@@ -1,0 +1,30 @@
+== Freightline / RED  (uid freightline-red, loaded by Grafana)
+   [timeseries] Request rate by service                                        OK    2 series/frames, 111 points
+   [timeseries] Request rate by route and status                               OK    3 series/frames, 163 points
+   [timeseries] Error ratio (5xx / all)                                        OK    2 series/frames, 111 points
+   [stat      ] Error ratio, last 5 min                                        OK    1 series/frames, 1 points
+   [timeseries] Latency p50 / p99 (exemplars on: click a dot to open the trace OK    5 series/frames, 255 points
+   [stat      ] Requests within 250 ms (latency SLI)                           OK    1 series/frames, 1 points
+   [logs      ] Warnings and errors (click a line: trace_id links to Tempo)    OK    1 series/frames, 3 points
+== Freightline / USE  (uid freightline-use, loaded by Grafana)
+   [timeseries] CPU used (cores)                                               OK    10 series/frames, 278 points
+   [timeseries] CPU utilisation vs request                                     EMPTY (expected: needs kube-state-metrics, D-14)
+   [timeseries] CPU saturation: CFS throttled / total periods                  EMPTY
+   [timeseries] Working set (bytes)                                            OK    10 series/frames, 270 points
+   [timeseries] Working set vs limit                                           EMPTY (expected: needs kube-state-metrics, D-14)
+   [timeseries] Container restarts (1 h)                                       EMPTY (expected: needs kube-state-metrics, D-14)
+   [timeseries] Last termination reason = OOMKilled                            EMPTY (expected: needs kube-state-metrics, D-14)
+   [timeseries] OOM events (cAdvisor, works today)                             OK    10 series/frames, 278 points
+   [timeseries] CPU utilisation                                                OK    1 series/frames, 61 points
+   [timeseries] CPU saturation: load1 per core                                 OK    1 series/frames, 61 points
+   [timeseries] Memory utilisation                                             OK    1 series/frames, 61 points
+   [timeseries] Memory saturation: major page faults/s                         OK    1 series/frames, 61 points
+   [timeseries] Network errors/s                                               OK    1 series/frames, 61 points
+== Freightline / Flow  (uid freightline-flow, loaded by Grafana)
+   [timeseries] Orders by final status (from logs)                             OK    3 series/frames, 47 points
+   [timeseries] Reservation results (inventory)                                OK    2 series/frames, 104 points
+   [timeseries] Precheck degraded (orders could not reach inventory in 300 ms) OK    1 series/frames, 1 points
+   [timeseries] DB pool exhausted (inventory 503s)                             EMPTY
+   [timeseries] p99 by span (server, client, database)                         OK    12 series/frames, 518 points
+   [nodeGraph ] orders -> inventory -> postgres (Tempo service graph)          OK    6 series/frames, 277 points
+== 0 panels with query errors

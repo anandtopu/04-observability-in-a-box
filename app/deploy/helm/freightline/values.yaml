@@ -10,14 +10,14 @@ global:
 # `--set services.inventory.env.DB_POOL_MAX=2` changes one service without restating the rest.
 services:
   orders:
-    image: { repository: freightline/orders, tag: "0.2.4" }
+    image: { repository: freightline/orders, tag: "0.2.5" }
     replicas: 1
     resources: { cpu: 100m, memory: 128Mi }
     env:
       INVENTORY_URL: http://inventory:8080
       FAULT_5XX_RATE: "0"            # P03's fault hook; M6 burn tests raise it
   inventory:
-    image: { repository: freightline/inventory, tag: "0.2.4" }
+    image: { repository: freightline/inventory, tag: "0.2.5" }
     replicas: 1
     resources: { cpu: 100m, memory: 256Mi }
     env:

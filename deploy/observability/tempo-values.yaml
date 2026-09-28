@@ -14,7 +14,16 @@ tempo:
       remote_write: [{ url: "http://kps-prometheus.monitoring:9090/api/v1/write", send_exemplars: true }]
   overrides:
     defaults:
-      metrics_generator: { processors: [service-graphs, span-metrics] }
+      metrics_generator:
+        processors: [service-graphs, span-metrics]
+        # Lab addition (M5): the default [peer.service, db.name, db.system] drew one Postgres as two
+        # nodes, "postgresql" (Go, old db.system) and "postgres" (Python, stable semconv). Both now
+        # emit the stable db.system.name, so it goes first. Not server.address: HTTP server spans
+        # carry it too (from the Host header), and Tempo then names the uninstrumented caller
+        # "orders.freightline" instead of "user".
+        processor:
+          service_graphs:
+            peer_attributes: [peer.service, db.system.name, db.name, db.system]
   # Lab sizing (not in the spec).
   resources:
     requests: { cpu: 100m, memory: 256Mi }

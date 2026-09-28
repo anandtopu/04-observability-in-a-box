@@ -1,0 +1,12 @@
+hop 1 exemplar: 58 exemplars in 15 min on orders; slowest 50.6 ms -> trace_id fddccd24b24c59c82340e7f35234ed65
+hop 2 trace: 9 spans; services inventory, orders
+         50.6 ms  orders  POST /v1/orders
+         48.3 ms  orders  HTTP POST
+         46.8 ms  inventory  POST /v1/reservations
+         43.3 ms  inventory  UPDATE
+hop 3 logs: 2 lines for the trace -> orders: order accepted | inventory: stock reserved
+   screenshot docs/evidence/p04/m5-red.png
+   screenshot docs/evidence/p04/m5-trace.png
+   screenshot docs/evidence/p04/m5-logs.png
+   screenshot docs/evidence/p04/m5-flow.png
+   screenshot docs/evidence/p04/m5-use.png
