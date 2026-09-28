@@ -15,10 +15,18 @@ Detection time from a clean history is about `60 × 14.4 / B` minutes: a 50% err
 ## First 5 minutes
 
 1. **Is it real traffic?** Grafana → *Freightline / RED*, `service = freightline/orders`. Error ratio and p99 should show the burn. If `OrdersMetricsAbsent` is firing instead, skip to "No metrics" below.
-2. **Follow an exemplar.** On *Latency p50 / p99*, click a dot near the spike → the Tempo trace opens. Look at which span holds the time (the M5 walk-through: `UPDATE` in inventory took 43 of 50 ms).
+2. **Follow an exemplar from the burn window.** On *Latency p50 / p99*, set the range to the last 15 minutes and click a dot **after the burn started**, not simply the slowest one: in the M8 game day a responder picked the slowest exemplar of the last 30 minutes, which predated the incident, and blamed the wrong service. Click a dot near the spike → the Tempo trace opens. Look at which span holds the time (the M5 walk-through: `UPDATE` in inventory took 43 of 50 ms).
 3. **Read that request's logs.** In the trace, *Logs for this span* runs `{service_name=…} | trace_id="…"` in Loki. For 5xx look for `injected fault`, `insert order`, `db pool exhausted` (inventory 503, the P04 incident), `inventory precheck degraded` (orders accepted as PENDING, not an error).
 4. **Was there a deploy?** The purple *Rollouts* annotation marks a new pod-template hash for the job. If a canary (P03) is live, switch to P03's abort runbook; a rollback is the fastest mitigation.
 5. **Check the fault hooks** (lab and staging only): `kubectl -n freightline get deploy orders -o jsonpath='{.spec.template.spec.containers[0].env}' | jq -c '.[] | select(.name|startswith("FAULT_"))'`. Non-zero `FAULT_5XX_RATE` / `FAULT_LATENCY_*` explains the burn.
+
+### Traps seen in the M8 game day
+
+- **Grafana's home page says "You have no firing alerts" during a live page.** That panel lists Grafana-managed alerts only; ours are Prometheus rules routed by Alertmanager. Use *Alerting → Alert rules* (data-source rules) or Alertmanager.
+- **The red span isn't necessarily the slow span.** When inventory is slow, the only error-status span is orders' 300 ms `HTTP POST` to inventory (deadline exceeded), while orders still answers 202 (PENDING). Read durations, not just colours, and open the child service's spans.
+- **Loki responses look as if `trace_id`/`span_id` were index labels.** They are structured metadata; the default response flattens them into `stream`. `| trace_id="…"` is the right filter (add the header `X-Loki-Response-Encoding-Flags: categorize-labels` to see the split).
+- **No new email for a second incident while a page is still firing.** Alertmanager deduplicates by labels and re-sends only after `repeat_interval` (12h here), and its notification log survives restarts. Check *active* alerts in Alertmanager, not just the inbox.
+- **Right after a Prometheus restart ALERTS is empty** while the SLO windows still hold the last incident; the page re-fires minutes later. Judge by `slo:sli_error:ratio_rate5m/30m`, not by the absence of alerts.
 
 ## Mitigate
 

@@ -2,7 +2,7 @@
 # M8 blind game day: restore, wait for a clean alert state, inject ONE fault picked at random, watch until
 # the page email. Output shows timings only; the fault's name goes to $SECRET (revealed after the run).
 #   SECRET=/path/outside/the/chat bash tests/m8-blind.sh
-# k6 must already be running (load/k6-job.yaml at 100 req/s). Port-forwards: Prometheus 9090, Mailpit 18025.
+# k6 must already be running (load/k6-job.yaml at 100 req/s). Port-forwards: Prometheus 9090, Alertmanager 9093, Mailpit 18025.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 PROM=http://localhost:9090; MAIL=http://localhost:18025; SECRET=${SECRET:?set SECRET to a file path}
@@ -21,7 +21,10 @@ clean() {
   local bad; bad=$(curl -s "$PROM/api/v1/query" --data-urlencode 'query=
       (count(slo:sli_error:ratio_rate5m{sloth_service="orders"} > on (sloth_id) 14.4 * (1 - slo:objective:ratio{sloth_service="orders"})) or vector(0))
     + (count(slo:sli_error:ratio_rate30m{sloth_service="orders"} > on (sloth_id) 6 * (1 - slo:objective:ratio{sloth_service="orders"})) or vector(0))' | jq -r '.data.result[0].value[1]')
-  [ "$(pages)" = "0" ] && [ "$bad" = "0" ]
+  # Alertmanager too: while it still holds a page as active, a new incident with the same labels is
+  # deduplicated (repeat_interval 12h) and nobody is emailed (M8, the notification log survived a restart).
+  local am; am=$(curl -s "http://localhost:9093/api/v2/alerts?active=true&filter=severity%3D%22page%22" | jq 'length')
+  [ "$(pages)" = "0" ] && [ "$bad" = "0" ] && [ "$am" = "0" ]
 }
 n=0; while [ $n -lt 4 ]; do if clean; then n=$((n+1)); else n=0; fi; sleep 30; done   # clean for 2 min
 say "SLO windows clean and no page firing for 2 min"
