@@ -1,0 +1,47 @@
+# Sloth SLO spec for orders (spec section 5, M6; ADR-P04-4: Sloth in CI, no controller in clusters).
+# Helm never renders this file: {{.window}} is Sloth's placeholder, not a Helm template.
+#   sloth generate -i deploy/observability/slo/orders.yaml -o deploy/observability/slo/generated/orders.rules.yaml
+#   kubectl apply -f deploy/observability/slo/generated/
+# The generated PrometheusRule is committed: its diff is the change evidence for a customer's CAB.
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata: { name: freightline-orders, namespace: monitoring }
+spec:
+  service: orders
+  labels: { owner: freightline, tier: "1" }
+  slos:
+    - name: requests-availability
+      objective: 99.9
+      description: "99.9% of orders requests over 30 days are not 5xx."
+      sli:
+        events:
+          # "or vector(0)": with no 5xx the error query has no series and every ratio/budget series
+          # would be absent instead of 0 (the M4/M5 absent-vs-zero lesson). sum() has no labels, so
+          # vector(0) matches; with no traffic at all the total is empty and the ratio stays absent.
+          errorQuery: sum(rate(http_server_request_duration_seconds_count{job="freightline/orders",http_response_status_code=~"5.."}[{{.window}}])) or vector(0)
+          totalQuery: sum(rate(http_server_request_duration_seconds_count{job="freightline/orders"}[{{.window}}]))
+      alerting:
+        name: OrdersAvailabilityBurn
+        annotations: { runbook_url: "docs/runbooks/slo-burn.md" }
+        pageAlert: { labels: { severity: page } }
+        ticketAlert: { labels: { severity: ticket } }
+    # 250 ms, not the 300 ms NFR: 0.25 is a histogram bucket boundary, so "requests <= 250 ms" is
+    # a counted fact; 0.3 would fall inside the 0.25-0.5 bucket and have to be interpolated.
+    # Error = total requests minus those in the le="0.25" bucket.
+    - name: requests-latency
+      objective: 99
+      description: "99% of orders requests over 30 days complete within 250 ms."
+      sli:
+        events:
+          errorQuery: |
+            (
+              sum(rate(http_server_request_duration_seconds_count{job="freightline/orders"}[{{.window}}]))
+              -
+              sum(rate(http_server_request_duration_seconds_bucket{job="freightline/orders",le="0.25"}[{{.window}}]))
+            )
+          totalQuery: sum(rate(http_server_request_duration_seconds_count{job="freightline/orders"}[{{.window}}]))
+      alerting:
+        name: OrdersLatencyBurn
+        annotations: { runbook_url: "docs/runbooks/slo-burn.md" }
+        pageAlert: { labels: { severity: page } }
+        ticketAlert: { labels: { severity: ticket } }

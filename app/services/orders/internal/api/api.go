@@ -91,9 +91,16 @@ func (c *InventoryClient) Reserve(ctx context.Context, o Order) error {
 // Register mounts the orders API on mux.
 func Register(mux *http.ServeMux, pool *pgxpool.Pool, inv *InventoryClient) {
 	fault5xx, _ := strconv.ParseFloat(os.Getenv("FAULT_5XX_RATE"), 64) // P03's fault hook; M6 burn tests use it
+	// Latency fault for M6's latency-SLO burn test: delay a fraction of orders requests. The sleep
+	// happens inside the server span, so it lands in the same histogram the SLO reads.
+	faultLatencyRate, _ := strconv.ParseFloat(os.Getenv("FAULT_LATENCY_RATE"), 64)
+	faultLatencyMS, _ := strconv.Atoi(os.Getenv("FAULT_LATENCY_MS"))
 
 	mux.HandleFunc("POST /v1/orders", func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
+		if faultLatencyMS > 0 && faultLatencyRate > 0 && rand.Float64() < faultLatencyRate {
+			time.Sleep(time.Duration(faultLatencyMS) * time.Millisecond)
+		}
 		if fault5xx > 0 && rand.Float64() < fault5xx {
 			slog.ErrorContext(ctx, "injected fault", "fault", "FAULT_5XX_RATE", "rate", fault5xx)
 			http.Error(w, "injected fault", http.StatusInternalServerError)

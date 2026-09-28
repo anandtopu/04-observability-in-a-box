@@ -1,0 +1,92 @@
+# promtool unit tests for the Sloth-generated SLO rules (deploy/observability/slo/generated/).
+# Spec section 7 "Fast / slow burn" and M6's detection maths: from a clean history, burn rate B trips
+# the page (14.4x over 1h AND 5m) after about 60 * 14.4 / B minutes. Traffic: 10 req/s = 600/min.
+# Every case starts with 6 hours (360 min) of clean history. With less, the 6h window is only
+# partly filled and the page's second pair (6x over 6h AND 30m) fires much earlier (M6 finding:
+# a freshly started system pages faster).
+# Run: bash tests/promtool-rules.sh
+rule_files: [orders-slo.rules.yaml]
+evaluation_interval: 1m
+tests:
+  - name: 50% errors (B=500) pages within 5 minutes (formula 1.7 min)
+    interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{job="freightline/orders",http_response_status_code="202"}'
+        values: '0+600x360 216000+300x30'
+      - series: 'http_server_request_duration_seconds_count{job="freightline/orders",http_response_status_code="500"}'
+        values: '0x360 0+300x30'
+      - series: 'http_server_request_duration_seconds_bucket{job="freightline/orders",le="0.25"}'
+        values: '0+600x390'
+    promql_expr_test:
+      - expr: count(ALERTS{alertname="OrdersAvailabilityBurn",severity="page",alertstate="firing"})
+        eval_time: 360m
+        exp_samples: []
+      - expr: count(ALERTS{alertname="OrdersAvailabilityBurn",severity="page",alertstate="firing"})
+        eval_time: 365m
+        exp_samples: [{ labels: '{}', value: 1 }]
+
+  - name: 2% errors (B=20) does not page at 30 min, pages by 50 min (formula 43 min)
+    interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{job="freightline/orders",http_response_status_code="202"}'
+        values: '0+600x360 216000+588x60'
+      - series: 'http_server_request_duration_seconds_count{job="freightline/orders",http_response_status_code="500"}'
+        values: '0x360 0+12x60'
+      - series: 'http_server_request_duration_seconds_bucket{job="freightline/orders",le="0.25"}'
+        values: '0+600x420'
+    promql_expr_test:
+      - expr: count(ALERTS{alertname="OrdersAvailabilityBurn",severity="page",alertstate="firing"})
+        eval_time: 390m
+        exp_samples: []
+      - expr: count(ALERTS{alertname="OrdersAvailabilityBurn",severity="page",alertstate="firing"})
+        eval_time: 410m
+        exp_samples: [{ labels: '{}', value: 1 }]
+
+  - name: every request slower than 250 ms (latency B=100) pages after ~8.6 min, not at 5 min
+    interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{job="freightline/orders",http_response_status_code="202"}'
+        values: '0+600x390'
+      - series: 'http_server_request_duration_seconds_bucket{job="freightline/orders",le="0.25"}'
+        values: '0+600x360 216000x30'   # nothing lands in the <=250 ms bucket after minute 360
+    promql_expr_test:
+      - expr: count(ALERTS{alertname="OrdersLatencyBurn",severity="page",alertstate="firing"})
+        eval_time: 365m
+        exp_samples: []
+      - expr: count(ALERTS{alertname="OrdersLatencyBurn",severity="page",alertstate="firing"})
+        eval_time: 372m
+        exp_samples: [{ labels: '{}', value: 1 }]
+
+  # Steady 0.1% is exactly 1x burn: it spends the whole budget by the end of the 30 days. It must
+  # never page (success criterion 3). The 1x ticket may fire: 1 * (1 - 0.999) evaluates to
+  # 0.00099999999999994 in floating point, just below 0.001; a ticket at 1x is the designed response.
+  - name: steady 0.1% errors (B=1) for 3 hours never pages (success criterion 3)
+    interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{job="freightline/orders",http_response_status_code="202"}'
+        values: '0+599.4x540'
+      - series: 'http_server_request_duration_seconds_count{job="freightline/orders",http_response_status_code="500"}'
+        values: '0+0.6x540'
+      - series: 'http_server_request_duration_seconds_bucket{job="freightline/orders",le="0.25"}'
+        values: '0+600x540'
+    promql_expr_test:
+      - expr: count(ALERTS{alertname="OrdersAvailabilityBurn",severity="page"})
+        eval_time: 120m
+        exp_samples: []
+      - expr: count(ALERTS{alertname="OrdersAvailabilityBurn",severity="page"})
+        eval_time: 540m
+        exp_samples: []
+
+  - name: healthy (no 5xx at all) reads 0, not absent (the "or vector(0)" fix)
+    interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{job="freightline/orders",http_response_status_code="202"}'
+        values: '0+600x30'
+      - series: 'http_server_request_duration_seconds_bucket{job="freightline/orders",le="0.25"}'
+        values: '0+600x30'
+    promql_expr_test:
+      - expr: slo:sli_error:ratio_rate5m{sloth_slo="requests-availability"}
+        eval_time: 20m
+        exp_samples:
+          - labels: 'slo:sli_error:ratio_rate5m{owner="freightline",sloth_id="orders-requests-availability",sloth_service="orders",sloth_slo="requests-availability",sloth_window="5m",tier="1"}'
+            value: 0

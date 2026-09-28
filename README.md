@@ -45,7 +45,7 @@ bash scripts/kind-load-images.sh
 Build and side-load the app images:
 
 ```bash
-bash app/build-images.sh 0.2.5
+bash app/build-images.sh 0.2.6
 ```
 
 Create the PSA-restricted namespace:

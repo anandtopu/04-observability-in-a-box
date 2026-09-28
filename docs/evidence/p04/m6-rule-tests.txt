@@ -1,0 +1,10 @@
+Checking pipeline-alerts.rules.yaml
+  SUCCESS: 4 rules found
+
+Checking orders-slo.rules.yaml
+  SUCCESS: 34 rules found
+
+  SUCCESS
+
+  SUCCESS
+

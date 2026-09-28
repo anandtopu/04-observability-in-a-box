@@ -1,0 +1,3 @@
+$ kubectl -n monitoring get prometheusrule freightline-orders
+NAME                 AGE
+freightline-orders   1s
