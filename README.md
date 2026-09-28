@@ -6,7 +6,7 @@ A learning build from the FDE Onboarding Handbook: Beacon's standard observabili
 - dashboards and SLO burn-rate alerts as code;
 - a customer-export overlay for Splunk or Datadog behind a TLS-inspecting proxy.
 
-**Status:** M0–M8 done (Tier A kind, P04-lite app, instrumentation hygiene, Prometheus with the OTLP receiver, Tempo and Loki, gateway and agent Collectors, RED/USE/Flow dashboards, Sloth SLOs with burn-rate alerts, customer export mode, load matrix and game day). Measured results: [`docs/evidence/p04/m8-testing-matrix.md`](docs/evidence/p04/m8-testing-matrix.md); interview prep: [`docs/INTERVIEW_NOTES.md`](docs/INTERVIEW_NOTES.md). Open items: the game-day gate is not met (D-37), the Python SDK misses the 5% overhead budget, profiles are written but not deployed (D-33), kube-state-metrics waits on `cdn.registry.k8s.io` (D-14). Progress: [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md); departures from the spec: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md). The build is done in **Claude Code cloud sessions**, following [`docs/CLOUD_BUILD_PROMPT.md`](docs/CLOUD_BUILD_PROMPT.md).
+**Status:** M0–M8 done (Tier A kind, P04-lite app, instrumentation hygiene, Prometheus with the OTLP receiver, Tempo and Loki, gateway and agent Collectors, RED/USE/Flow dashboards, Sloth SLOs with burn-rate alerts, customer export mode, load matrix, game day and its rerun, per-span trace-to-logs). Measured results: [`docs/evidence/p04/m8-testing-matrix.md`](docs/evidence/p04/m8-testing-matrix.md); interview prep: [`docs/INTERVIEW_NOTES.md`](docs/INTERVIEW_NOTES.md); runbooks: [`docs/runbooks/`](docs/runbooks/). Open items: the game-day gate as written (two humans, < 2 min) is not met (D-37, D-39); the Python SDK misses the 5% overhead budget; profiles are written but not deployed (D-33); kube-state-metrics waits on `cdn.registry.k8s.io` (D-14). Progress: [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md); departures from the spec: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md). The build is done in **Claude Code cloud sessions**, following [`docs/CLOUD_BUILD_PROMPT.md`](docs/CLOUD_BUILD_PROMPT.md).
 
 | Path | What it is |
 |---|---|
@@ -42,10 +42,10 @@ Side-load third-party images (the kind node cannot pull through the cloud sessio
 bash scripts/kind-load-images.sh
 ```
 
-Build and side-load the app images:
+Build and side-load the app images (the tag must match `image.tag` in `app/deploy/helm/freightline/values.yaml`, currently 0.2.9):
 
 ```bash
-bash app/build-images.sh 0.2.6
+bash app/build-images.sh 0.2.9
 ```
 
 Create the PSA-restricted namespace:
@@ -187,3 +187,35 @@ bash tests/m8-gameday.sh start 100 60
 ```bash
 bash tests/m8-gameday.sh restore
 ```
+
+## Tests
+
+Unit tests (no cluster needed). orders: failed inventory calls are logged inside the `HTTP POST` client span.
+
+```bash
+cd app/services/orders && GOTOOLCHAIN=local go test ./...
+```
+
+inventory: the JSON log formatter (span IDs, levels, extra fields).
+
+```bash
+cd app/services/inventory && uv run python -m unittest discover -s tests -v
+```
+
+Alert and SLO rules (promtool in a container: 3 suites, 34 Sloth rules):
+
+```bash
+bash tests/promtool-rules.sh
+```
+
+Generated artefacts must match what is committed (both commands leave `git status` clean):
+
+```bash
+python3 deploy/observability/dashboards/generate.py
+```
+
+```bash
+sloth generate -i deploy/observability/slo/orders.yaml -o deploy/observability/slo/generated/orders.rules.yaml
+```
+
+Runtime checks against the lab (port-forwards from section 6): `tests/m0-smoke.sh`, `tests/m3-correlation.sh`, `tests/m4-pipeline.sh`, `tests/burn-tests.sh`, `tests/sink-outage.sh`, `tests/m8-correlation.py`, `tests/m8-matrix.sh`, `tests/m8-sink-freshness.sh`.

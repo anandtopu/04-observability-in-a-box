@@ -134,3 +134,29 @@
 
 == after the drill: step 4 fixed (D-38, m8-step4-fix.txt). The same click now opens "Logs for this span" on the failing
    HTTP POST span and shows one line: "inventory call failed ... context deadline exceeded" (elapsed_ms 300).
+
+== RERUN with the step-4 fix (0.2.9 + filterBySpanID), blind, tests/m8-blind.sh
+   17:26:37 load 100 req/s; driver waited for clean windows (the fix verification's fault held the 30m latency window)
+   17:55:49 injected (random pick)   17:59:07 page email OrdersAvailabilityBurn (t+201 s)
+   fault revealed after the drill: A, orders FAULT_5XX_RATE=0.2
+
+   participant 2 (rerun, fresh agent, not a human; same cold brief as run 1)
+     launched 17:59:23.4 (page email 17:59:07, fault injected 17:55:49)
+     17:59:39 password + dashboards/datasources   16 s
+     17:59:45 RED latency panel + query           22 s
+     17:59:51 request picked: a status-500 exemplar on orders (0.18 ms), trace e8bab46d...   28 s
+     17:59:58 trace opened, failing span found (orders POST /v1/orders, SERVER, ERROR, 500, 1 span)   35 s
+     18:00:03-05 log line found (Loki |= trace_id): level=error msg="injected fault" fault=FAULT_5XX_RATE rate=0.2,
+              span_id d8193ad78d4e3794 = the span   ~42 s
+     diagnosis: CORRECT (fault injection in orders, 20% 500s)
+     friction it reported: no errors panel with exemplars (the only exemplar panel is latency p99; fast 500s sit in the
+       lowest bucket and never show as high dots, it had to filter exemplars by status code); no SLO dashboard; job label
+       "freightline/orders"; error span has no status message/exception event; base64 vs hex span ids via the raw API
+
+   participant 1 (owner, remote, relayed), clock start 17:59:39
+     step 1 18:01:14 RED dashboard, last 15 min (+95 s)      step 2 18:02:07 scrolled to the latency panel (+148 s)
+     the owner ended the drill there to close the session: NOT COMPLETED (2 steps); the VM was reclaimed again ~18:30
+   answer key: orders POST /v1/orders server span, ERROR 500 in ~0.2 ms; log (error) "injected fault" fault=FAULT_5XX_RATE
+     rate=0.2 with the span's own span_id; visible without any click in the RED 'Warnings and errors' panel (step 2 screenshot)
+   gate: participant 2 (agent) reached the failing span's logs with the right cause in ~42 s; one human run incomplete
+     -> still NOT MET as specified (two people who didn't build the stack)
