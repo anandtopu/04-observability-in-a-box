@@ -11,8 +11,12 @@ say() { echo "$(date -u +%H:%M:%S) $*"; }
 q() { curl -s "$PROM/api/v1/query" --data-urlencode "query=$1" | jq -r '.data.result[0].value[1] // "none"'; }
 fmt() { awk -v v="$1" -v m="${2:-1}" -v u="${3:-}" 'BEGIN{ if (v=="none") print "none"; else printf "%.3f%s\n", v*m, u }'; }
 
-pool() {
-  bash app/deploy.sh --set "services.inventory.env.DB_POOL_MAX=$1" >/dev/null 2>&1 || say "helm upgrade FAILED"
+# Both phases run with each reservation holding its connection SLOW_MS (default 30 ms, D-36): P04-lite's
+# real query is a few ms, so a pool of 2 alone did not exhaust at 100 req/s (attempt 1, measured).
+# Capacity ~ pool / hold time: 10 / 0.03 s = 333 req/s (healthy), 2 / 0.03 s = 66 req/s (exhausted).
+SLOW_MS=${SLOW_MS:-30}
+pool() { # DB_POOL_MAX [FAULT_DB_SLOW_MS]
+  bash app/deploy.sh --set "services.inventory.env.DB_POOL_MAX=$1" --set "services.inventory.env.FAULT_DB_SLOW_MS=${2:-$SLOW_MS}" >/dev/null 2>&1 || say "helm upgrade FAILED"
   kubectl -n freightline rollout status deploy/inventory --timeout=120s >/dev/null
 }
 
@@ -24,7 +28,9 @@ case "${1:-}" in
     kubectl -n freightline delete job k6-steady --ignore-not-found --wait >/dev/null
     kubectl -n freightline create configmap k6-steady --from-file=load/steady.js --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     sed -e "s/value: \"10\"/value: \"$rate\"/" -e "s/value: \"60s\"/value: \"${min}m\"/" load/k6-job.yaml | kubectl apply -f - >/dev/null
+    pool 10; say "baseline: DB_POOL_MAX=10, FAULT_DB_SLOW_MS=$SLOW_MS"
     sleep 180
+    say "== baseline orders p99=$(fmt "$(q 'histogram_quantile(0.99, sum by (le) (rate(http_server_request_duration_seconds_bucket{job="freightline/orders",http_route="/v1/orders"}[2m])))')" 1000 ms)"
     say "== INJECT: helm upgrade with services.inventory.env.DB_POOL_MAX=2"
     pool 2; t0=$(date +%s); say "inventory rolled out with DB_POOL_MAX=2 (t=0)"
     declare -A first=()
@@ -43,7 +49,7 @@ case "${1:-}" in
     curl -s "$MAIL/api/v1/messages" | jq -r '.messages[] | "   \(.Created[11:19]) to=\(.To[0].Address) \(.Subject)"'
     say "== incident left running for the participants; restore with: bash tests/m8-gameday.sh restore" ;;
   restore)
-    pool 10; kubectl -n freightline delete job k6-steady --ignore-not-found >/dev/null
-    say "DB_POOL_MAX=10 restored, k6 stopped" ;;
+    pool 10 0; kubectl -n freightline delete job k6-steady --ignore-not-found >/dev/null
+    say "DB_POOL_MAX=10 and FAULT_DB_SLOW_MS=0 restored, k6 stopped" ;;
   *) sed -n 2,6p "$0"; exit 2 ;;
 esac

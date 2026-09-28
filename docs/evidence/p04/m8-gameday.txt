@@ -1,0 +1,99 @@
+== M8 game day: tests/m8-gameday.sh start 100 60 (in-cluster k6, 100 req/s)
+
+-- attempt 1: DB_POOL_MAX=2 alone (0.2.7). Did not reproduce the incident (D-36): 0 'db pool exhausted', orders p99 ~45 ms over 4 min
+08:35:00 == setup: clear Mailpit, k6 at 100 req/s for 60 min, 3 min of healthy baseline
+08:38:01 == INJECT: helm upgrade with services.inventory.env.DB_POOL_MAX=2
+08:38:08 inventory rolled out with DB_POOL_MAX=2 (t=0)
+08:38:09    ALERT FIRING: NodeClockNotSynchronising/warning at t+0s
+08:38:09    ALERT FIRING: NodeFilesystemAlmostOutOfSpace/warning at t+0s
+08:38:09    ALERT FIRING: OrdersAvailabilityBurn/ticket at t+0s
+   t+0s orders p99=46.486ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.000 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlm
+   t+16s orders p99=46.371ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.000 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAl
+   t+31s orders p99=53.125ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.000 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAl
+   t+46s orders p99=52.564ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.000 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAl
+   t+61s orders p99=49.427ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.000 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAl
+   t+76s orders p99=42.021ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.000 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAl
+   t+91s orders p99=43.812ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.000 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAl
+   t+106s orders p99=44.101ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.000 firing=[NodeClockNotSynchronising/warning,NodeFilesystemA
+   t+121s orders p99=47.074ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.000 firing=[NodeClockNotSynchronising/warning,NodeFilesystemA
+   t+136s orders p99=43.103ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.000 firing=[NodeClockNotSynchronising/warning,NodeFilesystemA
+   t+151s orders p99=48.775ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.000 firing=[NodeClockNotSynchronising/warning,NodeFilesystemA
+   t+166s orders p99=45.586ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.000 firing=[NodeClockNotSynchronising/warning,NodeFilesystemA
+   t+182s orders p99=46.515ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.000 firing=[NodeClockNotSynchronising/warning,NodeFilesystemA
+   t+197s orders p99=42.092ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.000 firing=[NodeClockNotSynchronising/warning,NodeFilesystemA
+   t+212s orders p99=150.688ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.000 firing=[NodeClockNotSynchronising/warning,NodeFilesystem
+   t+227s orders p99=150.625ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.001 firing=[NodeClockNotSynchronising/warning,NodeFilesystem
+
+-- attempt 2: FAULT_DB_SLOW_MS=30 in baseline and incident (0.2.8), DB_POOL_MAX 10 -> 2
+08:43:18 == setup: clear Mailpit, k6 at 100 req/s for 60 min, 3 min of healthy baseline
+08:43:27 baseline: DB_POOL_MAX=10, FAULT_DB_SLOW_MS=30
+08:46:27 == baseline orders p99=87.268ms
+08:46:27 == INJECT: helm upgrade with services.inventory.env.DB_POOL_MAX=2
+08:46:35 inventory rolled out with DB_POOL_MAX=2 (t=0)
+08:46:35    ALERT FIRING: NodeClockNotSynchronising/warning at t+0s
+08:46:35    ALERT FIRING: NodeFilesystemAlmostOutOfSpace/warning at t+0s
+08:46:35    ALERT FIRING: OrdersAvailabilityBurn/ticket at t+0s
+   t+0s orders p99=78.130ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.042 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket] page mails=0
+   t+15s orders p99=439.321ms inventory 503/s=0.000 latency SLI bad ratio 5m=0.050 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket] page mails=0
+   t+31s orders p99=492.237ms inventory 503/s=7.583 latency SLI bad ratio 5m=0.050 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket] page mails=0
+   t+46s orders p99=496.171ms inventory 503/s=13.188 latency SLI bad ratio 5m=0.147 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket] page mails=0
+08:47:36    ALERT FIRING: OrdersLatencyBurn/ticket at t+61s
+   t+61s orders p99=497.323ms inventory 503/s=18.417 latency SLI bad ratio 5m=0.147 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mail
+   t+76s orders p99=497.455ms inventory 503/s=20.973 latency SLI bad ratio 5m=0.238 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mail
+   t+91s orders p99=497.455ms inventory 503/s=20.396 latency SLI bad ratio 5m=0.238 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mail
+   t+106s orders p99=497.455ms inventory 503/s=19.684 latency SLI bad ratio 5m=0.303 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mai
+   t+121s orders p99=497.456ms inventory 503/s=18.796 latency SLI bad ratio 5m=0.303 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mai
+   t+136s orders p99=497.455ms inventory 503/s=18.551 latency SLI bad ratio 5m=0.414 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mai
+   t+151s orders p99=497.455ms inventory 503/s=19.373 latency SLI bad ratio 5m=0.414 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mai
+   t+166s orders p99=497.456ms inventory 503/s=20.483 latency SLI bad ratio 5m=0.517 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mai
+   t+182s orders p99=497.451ms inventory 503/s=20.905 latency SLI bad ratio 5m=0.517 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mai
+   t+197s orders p99=497.453ms inventory 503/s=20.082 latency SLI bad ratio 5m=0.620 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mai
+   t+212s orders p99=497.452ms inventory 503/s=18.948 latency SLI bad ratio 5m=0.620 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mai
+   t+227s orders p99=497.458ms inventory 503/s=18.548 latency SLI bad ratio 5m=0.723 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mai
+   t+242s orders p99=497.456ms inventory 503/s=18.772 latency SLI bad ratio 5m=0.723 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mai
+   t+257s orders p99=497.456ms inventory 503/s=19.794 latency SLI bad ratio 5m=0.827 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mai
+   t+272s orders p99=497.456ms inventory 503/s=20.795 latency SLI bad ratio 5m=0.827 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mai
+   t+287s orders p99=497.454ms inventory 503/s=20.683 latency SLI bad ratio 5m=0.931 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mai
+   t+302s orders p99=497.453ms inventory 503/s=19.639 latency SLI bad ratio 5m=0.931 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mai
+   t+317s orders p99=497.452ms inventory 503/s=18.192 latency SLI bad ratio 5m=0.982 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/ticket] page mai
+08:52:07    ALERT FIRING: OrdersLatencyBurn/page at t+332s
+   t+332s orders p99=497.455ms inventory 503/s=17.637 latency SLI bad ratio 5m=0.982 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/page,OrdersLaten
+   t+348s orders p99=497.456ms inventory 503/s=18.703 latency SLI bad ratio 5m=0.982 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/page,OrdersLaten
+   t+363s orders p99=497.627ms inventory 503/s=19.684 latency SLI bad ratio 5m=0.982 firing=[NodeClockNotSynchronising/warning,NodeFilesystemAlmostOutOfSpace/warning,OrdersAvailabilityBurn/ticket,OrdersLatencyBurn/page,OrdersLaten
+08:52:38 == PAGE EMAIL delivered at t+363s (Mailpit)
+   08:52:25 to=page@lab.local [FIRING:1] OrdersLatencyBurn (freightline monitoring/kps-prometheus page orders-requests-latency orders page requests-latency 1)
+   08:47:55 to=ticket@lab.local [FIRING:1] OrdersLatencyBurn (freightline monitoring/kps-prometheus ticket orders-requests-latency orders ticket requests-latency 1)
+08:52:38 == incident left running for the participants; restore with: bash tests/m8-gameday.sh restore
+
+== detection chain (attempt 2)
+   08:46:35 t=0      inventory rolled out with DB_POOL_MAX=2 (FAULT_DB_SLOW_MS=30 in baseline and incident)
+   08:46:50 t+15s    orders p99 439 ms (baseline 87 ms)
+   08:47:06 t+31s    inventory 503s 7.6/s (PoolTimeout after 2 s -> "db pool exhausted")
+   08:47:36 t+61s    OrdersLatencyBurn/ticket firing (email 08:47:55)
+   08:52:07 t+332s   OrdersLatencyBurn/page firing: 5m ratio 0.98 AND 1h ratio > 0.144 (1h window held ~50 min of healthy 100 req/s)
+   08:52:25 t+350s   page email in Mailpit (page@lab.local)
+   08:55:37          k6 re-created for 240 min at 100 req/s so the incident stays live for participant 1
+
+== participant 2: a fresh agent (general-purpose subagent, no build context), NOT a human (adapted gate)
+   given: the page email text only, Grafana at :3000 (API only; the Grafana UI's own calls), no repo, no runbook
+   08:53:04.8  launched with the page                                  0 s
+   08:53:26    Grafana password, dashboards and datasources listed      21 s
+   08:53:33    RED "Latency p50 / p99 (exemplars on ...)" panel found   28 s
+   08:53:40    exemplar picked: slowest in 30 min, 5.012 s @ 08:42:59   35 s
+   08:53:47    trace opened (Tempo) and "failing span" named            42 s
+   08:53:57    log lines found (Loki, by trace_id)                      52 s   (report at 71 s)
+   RESULT: reached a failing span's logs in 52 s, but NOT the incident's: the exemplar (08:42:59) predates the
+   injection (08:46:35); it came from a VM-wide stall during the 0.2.8 image build (orders pool.acquire 4.5 s).
+   Its root cause ("orders DB pool starved") is wrong for this incident (inventory pool exhausted).
+   Verdict: FAIL on diagnosis; the stack led it to logs in < 1 min, the selection method misled it.
+   Its findings, checked:
+     valid   the only error-status span (orders -> inventory HTTP POST, 300 ms deadline) is not the slow span
+     valid   inventory logged "stock reserved" (201) after orders gave up at 300 ms and accepted the order as
+             PENDING: a possible orphaned reservation (P02 design gap, reported, not fixed here)
+     valid   no DB-pool saturation panel on any dashboard; pool exhaustion is visible only in traces/logs
+     valid   "slowest exemplar over a wide window" can predate the incident: pick exemplars inside the burn window
+     WRONG   "trace_id is not in structured metadata / span_id is a stream label": Loki's index labels are the 9
+             resource labels only; trace_id and span_id are structured metadata (verified with the
+             categorize-labels response flag). The default response flattens structured metadata into "stream".
+     note    the orders log line carries ship_to/consignee_name into Beacon's Loki (by design; stripped only
+             on the customer export path, M7 transform/pii)

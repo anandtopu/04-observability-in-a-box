@@ -34,3 +34,28 @@ otel-gateway-7d6746477f-fn7mj   1/1     Running   0          3m32s
 
 reset-aware recount (tests/m8-matrix.sh spans_between, 07:47:30-08:09:30): orders server spans 112855 vs k6 119978 = 5.94% gap
 diagnosis: 07:57:30-39 WAL block completion + compaction of the 07:04-07:57 block; working set 454 -> 984 -> ~1014 MiB of 1024; from 07:57:49 'failed to push bytes to instance'; 07:58:11 liveness probe (/ready, 5 s x 3) failed -> killed (exit 137, reason Error, not OOMKilled); restarted 07:58:41. Node CPU 1.6/4 cores (not starvation). Fix: Tempo limit 2Gi (D-35), re-run.
+
+== chaos run 2 (Tempo at 2Gi, D-35): the result
+08:13:08 [chaos] k6 started: target 100 req/s for 20 min (orders server spans before: 55172)
+08:15:11 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-8sv4k (#1)
+08:17:08 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-fn7mj (#2)
+08:19:11 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-w2t82 (#3)
+08:21:08 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-r4h6p (#4)
+08:23:10 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-9tn85 (#5)
+08:25:13 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-87pjb (#6)
+08:27:10 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-dvrjr (#7)
+08:29:12 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-gfhcl (#8)
+08:31:09 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-q78hr (#9)
+08:34:42 [chaos] RESULT target=100/s achieved=100.0/s requests=119971 dropped_iterations=30 http_req_failed=0.00% p(99)=47.17ms
+08:34:42 [chaos] RESULT cpu cores: orders=0.2528 inventory=0.3501 observability-ns=0.059 | head series=47321 (live 22393)
+08:34:42 [chaos] RESULT orders server spans in Tempo=119971 vs k6 requests=119971: gap 0.000% (gateway pods deleted: 9)
+--- k6 summary (chaos)
+       http_req_duration{name:POST /v1/orders}
+       http_req_failed
+       checks_total.......: 239942  199.949524/s
+       checks_succeeded...: 100.00% 239942 out of 239942
+       checks_failed......: 0.00%   0 out of 239942
+       http_req_duration..............: avg=9.48ms med=7.25ms p(95)=18.69ms p(99)=47.17ms max=494.85ms
+       http_req_failed................: 0.00%  0 out of 119971
+       http_reqs......................: 119971 99.974762/s
+       dropped_iterations.............: 30     0.025/s

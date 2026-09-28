@@ -1,0 +1,13 @@
+== freshness per signal at 100 req/s (tests/m4-pipeline.sh during the game-day healthy baseline, 08:35-08:38, DB_POOL_MAX=10)
+-- run 1 (Tempo port-forward dead after the D-35 resize: the Tempo line is a test failure, not a measurement)
+== one request, followed through every backend (freshness = time until queryable)
+PASS  Loki freshness (NFR < 15 s) (0.7s < 15s)
+FAIL  the log line's trace has both services: expected inventory,orders, got 
+FAIL  Tempo freshness (complete trace queryable): expected < 30s, got none
+PASS  metrics freshness: newest orders sample age (NFR < 30 s) (10.2s < 30s)
+-- run 2 (forward re-opened)
+== one request, followed through every backend (freshness = time until queryable)
+PASS  Loki freshness (NFR < 15 s) (0.9s < 15s)
+PASS  the log line's trace has both services (inventory,orders)
+PASS  Tempo freshness (complete trace queryable) (1.0s < 30s)
+PASS  metrics freshness: newest orders sample age (NFR < 30 s) (4.4s < 30s)

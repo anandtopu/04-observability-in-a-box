@@ -25,6 +25,10 @@ pool = AsyncConnectionPool(
     timeout=float(os.environ.get("DB_POOL_TIMEOUT_SECONDS", "2")),
     open=False,
 )
+# M8 game day (DEVIATIONS D-36): P04-lite's reservation holds a connection for a few ms, so a pool of 2
+# still serves 100 req/s (measured). This makes each reservation hold its connection for N ms, like a
+# real query would; with 30 ms, 10 connections serve ~333 req/s and 2 serve ~66. 0 = off (default).
+FAULT_DB_SLOW_MS = float(os.environ.get("FAULT_DB_SLOW_MS", "0"))
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS stock (
@@ -98,6 +102,8 @@ class OutOfStock(Exception):
 async def reserve(r: Reservation, response: Response):
     try:
         async with pool.connection() as conn, conn.transaction():
+            if FAULT_DB_SLOW_MS:  # a slow query holding the connection (missing index, lock wait)
+                await conn.execute("SELECT pg_sleep(%s)", (FAULT_DB_SLOW_MS / 1000,))
             cur = await conn.execute(
                 "INSERT INTO reservations (order_id, sku, qty) VALUES (%s, %s, %s)"
                 " ON CONFLICT (order_id) DO NOTHING RETURNING order_id",
