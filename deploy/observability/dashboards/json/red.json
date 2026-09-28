@@ -315,13 +315,67 @@
       }
     },
     {
-      "type": "row",
-      "title": "Duration",
+      "type": "timeseries",
+      "title": "Failing requests (5xx): p99 latency, exemplars on: click a dot to open a failing trace",
+      "description": "Only 5xx responses, so every exemplar is a failing request (start here on an availability page). No data means no 5xx in the range. The line is interpolated inside a bucket (a 0.2 ms failure in the 0-5 ms bucket reads ~5 ms); the dots are each request's true duration. Labels are route templates, never IDs.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.99, sum by (job, http_route, le) (rate(http_server_request_duration_seconds_bucket{job=~\"$service\",http_response_status_code=~\"5..\"}[$__rate_interval])))",
+          "legendFormat": "p99 5xx {{job}} {{http_route}}",
+          "exemplar": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0,
+          "custom": {
+            "fillOpacity": 10,
+            "stacking": {
+              "mode": "none"
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
       "id": 7,
-      "collapsed": false,
       "gridPos": {
         "x": 0,
         "y": 18,
+        "w": 24,
+        "h": 8
+      }
+    },
+    {
+      "type": "row",
+      "title": "Duration",
+      "id": 8,
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 26,
         "w": 24,
         "h": 1
       },
@@ -382,10 +436,10 @@
           "mode": "multi"
         }
       },
-      "id": 8,
+      "id": 9,
       "gridPos": {
         "x": 0,
-        "y": 19,
+        "y": 27,
         "w": 16,
         "h": 8
       }
@@ -443,10 +497,10 @@
         "colorMode": "background",
         "graphMode": "area"
       },
-      "id": 9,
+      "id": 10,
       "gridPos": {
         "x": 16,
-        "y": 19,
+        "y": 27,
         "w": 8,
         "h": 8
       }
@@ -454,11 +508,11 @@
     {
       "type": "row",
       "title": "Logs",
-      "id": 10,
+      "id": 11,
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 27,
+        "y": 35,
         "w": 24,
         "h": 1
       },
@@ -488,10 +542,10 @@
         "enableLogDetails": true,
         "sortOrder": "Descending"
       },
-      "id": 11,
+      "id": 12,
       "gridPos": {
         "x": 0,
-        "y": 28,
+        "y": 36,
         "w": 24,
         "h": 10
       }

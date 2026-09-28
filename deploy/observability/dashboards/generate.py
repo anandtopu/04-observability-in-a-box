@@ -142,6 +142,17 @@ red.stat("Error ratio, last 5 min", [target(
     f' / sum(rate({H}_count{{job=~"$service"}}[5m]))',
     instant=True)], "percentunit", w=12,
          thresholds=[{"color": "green", "value": None}, {"color": "orange", "value": 0.001}, {"color": "red", "value": 0.01}])
+# M8 game-day rerun (D-39): on an availability page the only exemplar panel was latency p99, and failing requests
+# (a 500 in ~0.2 ms) sit in the lowest bucket, so no dot led to one. Grafana plots an exemplar at its own value
+# (the request's duration), so this panel is the latency OF failing requests: the selector matches 5xx series
+# only, every dot is a failing request, and clicking it opens that trace. Empty when nothing fails.
+red.ts("Failing requests (5xx): p99 latency, exemplars on: click a dot to open a failing trace", [target(
+    f'histogram_quantile(0.99, sum by (job, http_route, le) '
+    f'(rate({H}_bucket{{job=~"$service",http_response_status_code=~"5.."}}[$__rate_interval])))',
+    "p99 5xx {{job}} {{http_route}}", exemplar=True)], "s", w=24,
+       desc="Only 5xx responses, so every exemplar is a failing request (start here on an availability page). "
+            "No data means no 5xx in the range. The line is interpolated inside a bucket (a 0.2 ms failure in the "
+            "0-5 ms bucket reads ~5 ms); the dots are each request's true duration. Labels are route templates, never IDs.")
 red.row("Duration")
 red.ts("Latency p50 / p99 (exemplars on: click a dot to open the trace)", [
     target(f'histogram_quantile(0.99, sum by (job, le) (rate({H}_bucket{{job=~"$service"}}[$__rate_interval])))', "p99 {{job}}", "A", exemplar=True),

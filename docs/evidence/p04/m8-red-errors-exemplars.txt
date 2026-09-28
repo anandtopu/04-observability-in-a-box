@@ -1,0 +1,16 @@
+== RED: "Failing requests (5xx): p99 latency, exemplars on" panel (follow-up to the game-day rerun, D-39)
+why: on an availability page the only exemplar panel was latency p99; fast failures sit in the lowest bucket.
+query: histogram_quantile(0.99, sum by (job, http_route, le)
+         (rate(http_server_request_duration_seconds_bucket{job=~"$service",http_response_status_code=~"5.."}[$__rate_interval])))
+       exemplar: true  (Grafana plots each exemplar at its value = the request's duration)
+
+verification (fault A: orders FAULT_5XX_RATE=0.2, k6 100 req/s, 18:39:05; Grafana datasource proxy, last 5 min):
+  new panel's exemplars: 2 series, 5 exemplars, series status codes: 500 only, route /v1/orders
+    trace 788d6493...: POST /v1/orders, STATUS_CODE_ERROR, http 500
+    trace 9e246eb8...: POST /v1/orders, STATUS_CODE_ERROR, http 500
+    trace 2ce77da0...: POST /v1/orders, STATUS_CODE_ERROR, http 500
+  old latency panel, same window: 80 exemplars (201=26 202=39 409=10 500=5); 500s among the 10 highest dots: 0
+  tests/m5-dashboard-queries.py: new panel OK (2 series, 8 points); 0 panels with query errors
+  screenshot: m8-red-errors-exemplars.png (dots near 0 ms = true durations; the p99 line reads ~5 ms because
+    histogram_quantile interpolates inside the 0-5 ms bucket: said in the panel description)
+restore: fault off, k6 stopped; orders/inventory 0.2.9, 0 FAULT_* set
