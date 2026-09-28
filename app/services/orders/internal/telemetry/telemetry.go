@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
+	"strconv"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -22,6 +24,13 @@ import (
 // Setup installs global tracer and meter providers that push OTLP/gRPC.
 // The returned function flushes and stops both; call it on shutdown.
 func Setup(ctx context.Context) (func(context.Context) error, error) {
+	// OTEL_SDK_DISABLED is the spec's off switch (Python's opentelemetry-instrument honours it; the
+	// Go SDK does not read it). The globals stay no-op, so otelhttp/otelpgx wrappers still run but
+	// record nothing. M8 uses it for the SDK overhead A/B at the same load.
+	if disabled, _ := strconv.ParseBool(os.Getenv("OTEL_SDK_DISABLED")); disabled {
+		slog.Info("OpenTelemetry SDK disabled by OTEL_SDK_DISABLED")
+		return func(context.Context) error { return nil }, nil
+	}
 	// WithFromEnv reads OTEL_SERVICE_NAME and OTEL_RESOURCE_ATTRIBUTES, so
 	// service.namespace, service.version and (from M1) service.instance.id come from the chart.
 	res, err := resource.New(ctx, resource.WithFromEnv(), resource.WithTelemetrySDK())

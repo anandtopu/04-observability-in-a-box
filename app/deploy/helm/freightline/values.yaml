@@ -10,7 +10,7 @@ global:
 # `--set services.inventory.env.DB_POOL_MAX=2` changes one service without restating the rest.
 services:
   orders:
-    image: { repository: freightline/orders, tag: "0.2.6" }
+    image: { repository: freightline/orders, tag: "0.2.7" }
     replicas: 1
     resources: { cpu: 100m, memory: 128Mi }
     env:
@@ -19,7 +19,7 @@ services:
       FAULT_LATENCY_RATE: "0"        # M6 latency burn: fraction of requests delayed...
       FAULT_LATENCY_MS: "0"          # ...by this many milliseconds
   inventory:
-    image: { repository: freightline/inventory, tag: "0.2.6" }
+    image: { repository: freightline/inventory, tag: "0.2.7" }
     replicas: 1
     resources: { cpu: 100m, memory: 256Mi }
     env:

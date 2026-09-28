@@ -1,0 +1,54 @@
+07:09:30 OTEL_SDK_DISABLED=false on orders and inventory (pods ready)
+07:10:00 [on] k6 started: target 100 req/s for 10 min (orders server spans before: 11911)
+07:21:37 [on] RESULT target=100/s achieved=99.9/s requests=59913 dropped_iterations=88 http_req_failed=0.00% p(99)=65ms
+07:21:37 [on] RESULT cpu cores: orders=0.2599 inventory=0.3593 observability-ns=0.060 | head series=40970 (live 22358)
+07:21:37 [on] RESULT orders server spans in Tempo=59913 vs k6 requests=59913: gap 0.000%
+--- k6 summary (on)
+       http_req_duration{name:POST /v1/orders}
+       http_req_failed
+       checks_total.......: 119826  199.70731/s
+       checks_succeeded...: 100.00% 119826 out of 119826
+       checks_failed......: 0.00%   0 out of 119826
+       http_req_duration..............: avg=10.76ms med=7.41ms p(95)=23.5ms  p(99)=65ms    max=1.09s
+       http_req_failed................: 0.00% 0 out of 59913
+       http_reqs......................: 59913 99.853655/s
+       dropped_iterations.............: 88    0.146665/s
+07:21:43 OTEL_SDK_DISABLED=true on orders and inventory (pods ready)
+07:22:13 [off] k6 started: target 100 req/s for 10 min (orders server spans before: 71824)
+07:33:49 [off] RESULT target=100/s achieved=100.0/s requests=59982 dropped_iterations=19 http_req_failed=0.00% p(99)=27.89ms
+07:33:49 [off] RESULT cpu cores: orders=0.2238 inventory=0.2607 observability-ns=0.042 | head series=41393 (live 21927)
+07:33:49 [off] RESULT orders server spans in Tempo=0 vs k6 requests=59982: gap 100.000%
+--- k6 summary (off)
+       http_req_duration{name:POST /v1/orders}
+       http_req_failed
+       checks_total.......: 119964  199.937622/s
+       checks_succeeded...: 100.00% 119964 out of 119964
+       checks_failed......: 0.00%   0 out of 119964
+       http_req_duration..............: avg=8.02ms med=6.51ms p(95)=12.46ms p(99)=27.89ms max=538.42ms
+       http_req_failed................: 0.00% 0 out of 59982
+       http_reqs......................: 59982 99.968811/s
+       dropped_iterations.............: 19    0.031666/s
+07:33:57 OTEL_SDK_DISABLED=false on orders and inventory (pods ready)
+orders SDK overhead: on 0.2599 vs off 0.2238 cores = +16.1% (NFR < 5%)
+inventory SDK overhead: on 0.3593 vs off 0.2607 cores = +37.8% (NFR < 5%)
+
+== re-run of the 'on' arm at global.traceSampleRatio=0.1 (the chart's documented setting for 100 req/s), same 'off' baseline
+deployment "orders" successfully rolled out
+deployment "inventory" successfully rolled out
+07:34:53 traceSampleRatio=0.1 deployed
+07:35:23 [on-ratio01] k6 started: target 100 req/s for 10 min (orders server spans before: 71824)
+07:46:59 [on-ratio01] RESULT target=100/s achieved=100.0/s requests=59998 dropped_iterations=3 http_req_failed=0.00% p(99)=20.64ms
+07:46:59 [on-ratio01] RESULT cpu cores: orders=0.2331 inventory=0.3043 observability-ns=0.048 | head series=42585 (live 22221)
+07:46:59 [on-ratio01] RESULT orders server spans in Tempo=5955 vs k6 requests=59998: gap 90.075%
+--- k6 summary (on-ratio01)
+       http_req_duration{name:POST /v1/orders}
+       http_req_failed
+       checks_total.......: 119996  199.989289/s
+       checks_succeeded...: 100.00% 119996 out of 119996
+       checks_failed......: 0.00%   0 out of 119996
+       http_req_duration..............: avg=7.63ms med=6.77ms p(95)=12.15ms p(99)=20.64ms max=257.15ms
+       http_req_failed................: 0.00% 0 out of 59998
+       http_reqs......................: 59998 99.994645/s
+       dropped_iterations.............: 3     0.005/s
+orders SDK overhead @0.1: on 0.2331 vs off 0.2238 cores = +4.2% (NFR < 5%)
+inventory SDK overhead @0.1: on 0.3043 vs off 0.2607 cores = +16.7% (NFR < 5%)

@@ -49,13 +49,20 @@ M7=(
   ghcr.io/astral-sh/uv:python3.14-bookworm-slim   # customer-sim inspector sidecar (shell + grep)
 )
 
+# M8 (optional profiles): Alloy's pyroscope.ebpf DaemonSet and a monolithic Pyroscope.
+M8=(
+  docker.io/grafana/alloy:v1.19.2
+  docker.io/grafana/pyroscope:2.3.1
+)
+
 case "${1:-all}" in
   m0) IMAGES=("${M0[@]}") ;;
   m1) IMAGES=("${M1[@]}") ;;
   m2) IMAGES=("${M2[@]}") ;;
   m3) IMAGES=("${M3[@]}") ;;
   m7) IMAGES=("${M7[@]}") ;;
-  all) IMAGES=("${M0[@]}" "${M1[@]}" "${M2[@]}" "${M3[@]}" "${M7[@]}") ;;
+  m8) IMAGES=("${M8[@]}") ;;
+  all) IMAGES=("${M0[@]}" "${M1[@]}" "${M2[@]}" "${M3[@]}" "${M7[@]}" "${M8[@]}") ;;
   *) echo "unknown set: $1" >&2; exit 2 ;;
 esac
 

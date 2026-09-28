@@ -1,0 +1,36 @@
+== chaos run 1 (Tempo at 1Gi): INVALID for the gateway question, Tempo was killed mid-run
+deployment "orders" successfully rolled out
+deployment "inventory" successfully rolled out
+07:47:30 traceSampleRatio back to 1.0
+NAME                            READY   STATUS    RESTARTS      AGE   IP            NODE                        NOMINATED NODE   READINESS GATES
+otel-gateway-7d6746477f-n2pj4   1/1     Running   1 (51m ago)   98m   10.244.0.11   freightline-control-plane   <none>           <none>
+otel-gateway-7d6746477f-p6q2q   1/1     Running   2 (50m ago)   98m   10.244.0.10   freightline-control-plane   <none>           <none>
+07:48:00 [chaos] k6 started: target 100 req/s for 20 min (orders server spans before: 77779)
+07:50:03 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-n2pj4 (#1)
+07:52:00 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-p6q2q (#2)
+07:54:03 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-nqjd7 (#3)
+07:56:00 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-ftgdp (#4)
+07:58:03 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-4xrpk (#5)
+08:00:01 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-8rwhz (#6)
+08:02:03 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-zg29v (#7)
+08:04:00 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-57qtj (#8)
+08:06:03 [chaos] chaos: deleted pod/otel-gateway-7d6746477f-ns4f9 (#9)
+08:09:35 [chaos] RESULT target=100/s achieved=100.0/s requests=119978 dropped_iterations=22 http_req_failed=0.00% p(99)=148.81ms
+08:09:35 [chaos] RESULT cpu cores: orders=0.2490 inventory=0.3464 observability-ns=0.060 | head series=45263 (live 22318)
+08:09:35 [chaos] RESULT orders server spans in Tempo=-22607 vs k6 requests=119978: gap 118.843% (gateway pods deleted: 9)
+--- k6 summary (chaos)
+       http_req_duration{name:POST /v1/orders}
+       http_req_failed
+       checks_total.......: 239956  199.963207/s
+       checks_succeeded...: 100.00% 239956 out of 239956
+       checks_failed......: 0.00%   0 out of 239956
+       http_req_duration..............: avg=13.91ms med=7.38ms p(95)=45.76ms p(99)=148.81ms max=486.49ms
+       http_req_failed................: 0.00%  0 out of 119978
+       http_reqs......................: 119978 99.981604/s
+       dropped_iterations.............: 22     0.018333/s
+NAME                            READY   STATUS    RESTARTS   AGE
+otel-gateway-7d6746477f-8sv4k   1/1     Running   0          5m35s
+otel-gateway-7d6746477f-fn7mj   1/1     Running   0          3m32s
+
+reset-aware recount (tests/m8-matrix.sh spans_between, 07:47:30-08:09:30): orders server spans 112855 vs k6 119978 = 5.94% gap
+diagnosis: 07:57:30-39 WAL block completion + compaction of the 07:04-07:57 block; working set 454 -> 984 -> ~1014 MiB of 1024; from 07:57:49 'failed to push bytes to instance'; 07:58:11 liveness probe (/ready, 5 s x 3) failed -> killed (exit 137, reason Error, not OOMKilled); restarted 07:58:41. Node CPU 1.6/4 cores (not starvation). Fix: Tempo limit 2Gi (D-35), re-run.

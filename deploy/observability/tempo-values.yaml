@@ -24,7 +24,9 @@ tempo:
         processor:
           service_graphs:
             peer_attributes: [peer.service, db.system.name, db.name, db.system]
-  # Lab sizing (not in the spec).
+  # Lab sizing (not in the spec). M8: 1Gi held at 10 req/s but not at 100 req/s. Compacting an hour
+  # of traces took the working set from 454 MiB to ~1014 MiB in 15 s; Go GC thrashed under the
+  # limit, /ready stopped answering and the liveness probe killed Tempo mid-run (DEVIATIONS D-35).
   resources:
-    requests: { cpu: 100m, memory: 256Mi }
-    limits: { memory: 1Gi }
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { memory: 2Gi }

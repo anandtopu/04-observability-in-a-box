@@ -1,0 +1,22 @@
+61 distinct exemplar trace IDs in the last 15 min; checking the 20 slowest
+PASS  exemplar  2521.9 ms  trace 565bb0bafec38516106bf62a28abcc9c  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar  1022.4 ms  trace 955e0257aa94ceeb258a1d8d81b029d7  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar   751.0 ms  trace 0619b7e19ffe6b96d0f86adae4165eed  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar   539.9 ms  trace c4d5d787a0bba55dd5faf08d8cb74138  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar   514.2 ms  trace 5a66c7c96ab473c0c8dc93502f28c935  spans= 7 services=inventory,orders  log lines=3
+PASS  exemplar   320.7 ms  trace 09a6f3e698250a014c317f96d011f8ca  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar   253.0 ms  trace 388f57a4a7152bdea06b1d68a814db42  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar   251.1 ms  trace 3eafd71a52cd55b3b20543e1c8f64fb3  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar   107.0 ms  trace 40ad37e4b90e1612758d4039767f4b6c  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar   104.4 ms  trace b5dafc578fa795206ae8005287e3d800  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar   104.1 ms  trace ae5b6e4a40b414529688ba82980643aa  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar   103.0 ms  trace 4fd996f70dd4a347b1025225b673fbb8  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar    95.2 ms  trace 57d430af3908138fc3c2e0d8454fa491  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar    78.4 ms  trace 392416e808884bacd134c168b646ed47  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar    76.2 ms  trace 3e7066a53b15a99523222ecbba4afd9f  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar    75.8 ms  trace e5ecc1a2dd5ce606d79f0ddf765f36e6  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar    75.4 ms  trace 139aaf9df402b339a7109028868a48c9  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar    56.6 ms  trace f3bae050110ce762f48e987ab4aaea8b  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar    54.8 ms  trace eb640df337c9ad3bdbcf739bec699176  spans= 9 services=inventory,orders  log lines=2
+PASS  exemplar    54.3 ms  trace f94c2769df69cf05fca61e4a94ba629e  spans= 9 services=inventory,orders  log lines=2
+RESULT 20/20 exemplars resolve to a trace with >= 1 log line (pass: 20/20)

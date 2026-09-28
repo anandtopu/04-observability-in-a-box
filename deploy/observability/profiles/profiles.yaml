@@ -1,0 +1,143 @@
+# M8 (optional): continuous CPU profiles with no code change. Alloy's pyroscope.ebpf samples every
+# freightline process on the node from the kernel and writes to Pyroscope (spec: pyroscope.monitoring:4040).
+#   kubectl apply -f deploy/observability/profiles/profiles.yaml
+#   kubectl delete -f deploy/observability/profiles/profiles.yaml      # removes all of it
+# LAB ONLY. The Alloy pod is privileged, runs as root and shares the host PID namespace: it can read
+# every process's memory on the node. At a customer this needs written approval (spec M8), so it
+# lives in its own namespace whose Pod Security label says "privileged" in plain sight.
+# Plain manifests, not charts (DEVIATIONS D-33): one optional component, and every privilege visible here.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: profiling
+  labels:
+    pod-security.kubernetes.io/enforce: privileged   # the only namespace in this lab that allows it
+---
+# Pyroscope 2.3.1, monolithic (-target=all), filesystem storage on an emptyDir: profiles are a
+# debugging aid here, not a record, so losing them on a restart is acceptable in the lab.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: pyroscope, namespace: monitoring, labels: { app.kubernetes.io/name: pyroscope } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: pyroscope } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: pyroscope } }
+    spec:
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: pyroscope
+          image: docker.io/grafana/pyroscope:2.3.1
+          imagePullPolicy: IfNotPresent
+          args: ["-target=all", "-self-profiling.disable-push=true", "-analytics.reporting-enabled=false"]
+          ports: [{ name: http, containerPort: 4040 }]
+          readinessProbe: { httpGet: { path: /ready, port: http }, periodSeconds: 10 }
+          securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 1Gi } }
+          volumeMounts: [{ name: data, mountPath: /data }]
+      volumes: [{ name: data, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: pyroscope, namespace: monitoring }
+spec:
+  selector: { app.kubernetes.io/name: pyroscope }
+  ports: [{ name: http, port: 4040, targetPort: http }]
+---
+# Grafana picks this up through the kps datasource sidecar (label grafana_datasource: "1"): no
+# kps upgrade needed, and deleting this file removes the datasource too.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pyroscope-datasource
+  namespace: monitoring
+  labels: { grafana_datasource: "1" }
+data:
+  pyroscope.yaml: |
+    apiVersion: 1
+    datasources:
+      - { name: Pyroscope, uid: pyroscope, type: grafana-pyroscope-datasource, url: "http://pyroscope.monitoring:4040", access: proxy }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: alloy-profiles, namespace: profiling }
+---
+# Read-only pod discovery, to map a container's PID to its namespace, pod and service name.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: { name: alloy-profiles }
+rules: [{ apiGroups: [""], resources: [pods], verbs: [get, list, watch] }]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: { name: alloy-profiles }
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: alloy-profiles }
+subjects: [{ kind: ServiceAccount, name: alloy-profiles, namespace: profiling }]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: alloy-profiles, namespace: profiling }
+data:
+  config.alloy: |
+    // Only this node's pods, only the freightline namespace: the profiler never looks at the
+    // observability stack itself or at other tenants' pods.
+    discovery.kubernetes "pods" {
+      role = "pod"
+      selectors {
+        role  = "pod"
+        field = "spec.nodeName=" + sys.env("NODE_NAME")
+      }
+      namespaces { names = ["freightline"] }
+    }
+    // service_name matches the traces and logs (the agent Collector maps the same pod label), so
+    // Grafana can jump from a span to its service's flame graph.
+    discovery.relabel "freightline" {
+      targets = discovery.kubernetes.pods.targets
+      rule {
+        source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+        target_label  = "service_name"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_namespace"]
+        target_label  = "namespace"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_name"]
+        target_label  = "pod"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_pod_container_name"]
+        target_label  = "container"
+      }
+    }
+    // Samples on-CPU stacks at 97 Hz per CPU (the default), including CPython frames.
+    pyroscope.ebpf "freightline" {
+      targets    = discovery.relabel.freightline.output
+      forward_to = [pyroscope.write.local.receiver]
+    }
+    pyroscope.write "local" {
+      endpoint { url = "http://pyroscope.monitoring:4040" }
+    }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata: { name: alloy-profiles, namespace: profiling, labels: { app.kubernetes.io/name: alloy-profiles } }
+spec:
+  selector: { matchLabels: { app.kubernetes.io/name: alloy-profiles } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: alloy-profiles } }
+    spec:
+      serviceAccountName: alloy-profiles
+      hostPID: true                         # to see the application processes at all
+      containers:
+        - name: alloy
+          image: docker.io/grafana/alloy:v1.19.2
+          imagePullPolicy: IfNotPresent
+          args: ["run", "/etc/alloy/config.alloy", "--server.http.listen-addr=0.0.0.0:12345",
+                 "--storage.path=/tmp/alloy", "--disable-reporting"]
+          env: [{ name: NODE_NAME, valueFrom: { fieldRef: { fieldPath: spec.nodeName } } }]
+          ports: [{ name: http, containerPort: 12345 }]
+          securityContext: { privileged: true, runAsUser: 0 }   # loads BPF programs, opens perf events
+          resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 512Mi } }
+          volumeMounts: [{ name: config, mountPath: /etc/alloy }]
+      volumes: [{ name: config, configMap: { name: alloy-profiles } }]
