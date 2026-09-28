@@ -6,7 +6,7 @@ A learning build from the FDE Onboarding Handbook: Beacon's standard observabili
 - dashboards and SLO burn-rate alerts as code;
 - a customer-export overlay for Splunk or Datadog behind a TLS-inspecting proxy.
 
-**Status:** M0–M7 done (Tier A kind, P04-lite app, instrumentation hygiene, Prometheus with the OTLP receiver, Tempo and Loki, gateway and agent Collectors, RED/USE/Flow dashboards, Sloth SLOs with burn-rate alerts, customer export mode). Progress: [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md); departures from the spec: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md). The build is done in **Claude Code cloud sessions**, following [`docs/CLOUD_BUILD_PROMPT.md`](docs/CLOUD_BUILD_PROMPT.md).
+**Status:** M0–M8 done (Tier A kind, P04-lite app, instrumentation hygiene, Prometheus with the OTLP receiver, Tempo and Loki, gateway and agent Collectors, RED/USE/Flow dashboards, Sloth SLOs with burn-rate alerts, customer export mode, load matrix and game day). Measured results: [`docs/evidence/p04/m8-testing-matrix.md`](docs/evidence/p04/m8-testing-matrix.md); interview prep: [`docs/INTERVIEW_NOTES.md`](docs/INTERVIEW_NOTES.md). Open items: the game-day gate is not met (D-37), the Python SDK misses the 5% overhead budget, profiles are written but not deployed (D-33), kube-state-metrics waits on `cdn.registry.k8s.io` (D-14). Progress: [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md); departures from the spec: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md). The build is done in **Claude Code cloud sessions**, following [`docs/CLOUD_BUILD_PROMPT.md`](docs/CLOUD_BUILD_PROMPT.md).
 
 | Path | What it is |
 |---|---|
@@ -161,3 +161,29 @@ k6 run --no-usage-report -e RATE=20 -e DURATION=1m load/steady.js
 ```
 
 Tier B (Compose) and Tier C (render-only) quick starts will be added if we ever fall back to them; this VM runs Tier A.
+
+M8 load matrix, game day and recovery (see docs/BUILD_LOG.md M8). After the cloud VM is reclaimed, bring the lab back (dockerd, kind node, pods, port-forwards, k6) without touching Helm values:
+
+```bash
+bash scripts/recover.sh 120
+```
+
+```bash
+bash tests/m8-matrix.sh overhead 100 10
+```
+
+```bash
+bash tests/m8-matrix.sh chaos 100 20
+```
+
+```bash
+python3 tests/m8-correlation.py 20
+```
+
+```bash
+bash tests/m8-gameday.sh start 100 60
+```
+
+```bash
+bash tests/m8-gameday.sh restore
+```

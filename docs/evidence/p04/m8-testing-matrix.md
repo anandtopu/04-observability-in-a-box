@@ -17,6 +17,7 @@ row. "Adapted" marks a test run differently from the spec, with the reason.
 | Gateway chaos | `tests/m8-matrix.sh chaos 100 20`: delete the oldest gateway pod every 2 min for 20 min at 100 req/s | k6 `http_req_failed` unchanged; trace gaps < 1% | Run 2: **9 pods deleted**, `http_req_failed` **0.00%** (baseline 0.00%), **119,971 spans for 119,971 requests (0.000% gap)**, p99 47 ms. Run 1 was invalid: Tempo, not the gateway, was killed mid-run (D-35), 5.94% gap | **PASS** (run 2) — `m8-chaos.txt` |
 | Cardinality | Active series at 100 req/s | < 50,000 | **22,393 live** series (sample in last 5 min); TSDB head **47,321** after the chaos run (churn: 18 gateway pods, many rollouts, each minting new series until head compaction) | **PASS**, but churn uses 94% of the budget in the head — `m8-chaos.txt` |
 | PII | Seeded consignee name (`SEEDED_CONSIGNEE`) searched in Loki and in the sink | Zero hits | **0** fragments in the sink after the `transform/pii` fix (the spec's overlay alone leaked it in **53 of 178** records, D-27) | **PASS** after a spec fix — `m7-pii.txt` |
+| Game day (spec M8) | Inventory fault at 100 req/s; time alert → exemplar → trace → logs; two people who didn't build the stack, each < 2 min | Page 332 s after `DB_POOL_MAX=2` (+30 ms hold, D-36); blind run: page 110 s after a random fault. Participant 2 (a fresh agent, not a human): logs in **52 s** but from a pre-incident exemplar, wrong diagnosis. Participant 1 (the owner, remote, relayed): right path in 4 steps, one scroll from the answer, **did not finish**; 3 VM reclaims during the run | **NOT MET** (adapted; see `m8-gameday.txt`) |
 
 ## NFRs (spec §2)
 
@@ -28,7 +29,7 @@ row. "Adapted" marks a test run differently from the spec, with the reason.
 | Freshness: metrics | < 30 s | **4.4 s** at 100 req/s (10.2 s in a second sample; M4 idle 1.4–10.9 s) | **PASS** — `m8-freshness.txt` |
 | Freshness: Loki | < 15 s | **0.9 s** at 100 req/s (0.7 s; M4 idle 1.1 s) | **PASS** |
 | Freshness: traces (no NFR) | — | complete two-service trace **1.0 s** at 100 req/s (M4 idle 4.8–5.3 s: Python's span batcher waits 5 s when idle, fills in < 1 s under load) | — |
-| Freshness: customer sink | < 60 s | **not measured** (export mode is off; the gateway runs the Beacon-only config since the M7 rollback) | **NOT RUN** |
+| Freshness: customer sink | < 60 s | **1.0 / 0.8 / 0.8 s** (Cobalt overlay applied, 3 orders timed from POST to the record in customer-sim's file, then rolled back to Beacon-only, verified) | **PASS** — `m8-sink-freshness.txt` |
 | Durability | No log loss across a 10-min sink outage; gateway ×2 + PDB | 0 lost (above); 2 replicas + PDB `minAvailable: 1`; but a **rollout** during a sink problem lost 3,866 queued records (emptyDir, D-32) | **PASS** (outage) with a known gap (rollout) |
 | Cardinality | < 50,000; no order/customer/trace IDs as labels | 22,393 live / 47,321 head; label audit clean (IDs only in exemplars, log bodies and structured metadata) | **PASS** |
 | Retention | 72 h per signal | **12 h** in the lab (declared in M0: disk and RAM) | adapted |

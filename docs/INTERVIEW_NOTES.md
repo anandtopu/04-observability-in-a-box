@@ -59,7 +59,9 @@ the Python SDK costs 17% CPU at 100 req/s, over our 5% budget, and I can tell yo
 
 | What | Measured | Target | Evidence |
 |---|---|---|---|
-| Alert → exemplar → trace → logs (game day) | TBD | < 2 min per person | `m8-gameday.txt` |
+| Fault → page (game day, 100 req/s) | 332 s (pool 2 + 30 ms hold); 110 s (blind fault, 120 ms slow query) | page < 5 min | `m8-gameday.txt` |
+| Alert → exemplar → trace → logs (game day) | fresh agent: logs in 52 s but the wrong incident; owner (remote, relayed): right path in 4 steps, not finished | < 2 min per person | `m8-gameday.txt` (**not met**) |
+| Freshness, customer sink | 0.8–1.0 s | < 60 s | `m8-sink-freshness.txt` |
 | Active series at 100 req/s | 22,393 live (head 47,321 with churn) | < 50,000 | `m8-chaos.txt` |
 | Export parity (Loki vs Splunk exporter) | 36,034 = 36,034 | within 0.1% | `m7-sink-outage.txt` |
 | Queue drain after a 10-min sink outage | 50 s, 0 lost (11,776 queued) | < 5 min | `m7-sink-outage.txt` |
@@ -80,5 +82,11 @@ the Python SDK costs 17% CPU at 100 req/s, over our 5% budget, and I can tell yo
   right and leaked the consignee name in the log body (53 of 178 records): only a seeded search showed it.
 - **Book the customer's network team early**: proxy, CA and `NO_PROXY` were the long pole, and the
   persistent queue must be on a PVC before anyone touches config during an incident.
+- **Run the game day with people in the room, on a stable host.** The lab's cloud VM was reclaimed 3 times
+  during the blind run, a restart lost Tempo's last minutes of traces, and a chat relay can't time a
+  2-minute gate. What it did show: the *path* works (the owner reached the right logs in 4 steps), and the
+  traps are real. Pick exemplars inside the burn window (the agent took the slowest of 30 minutes, which
+  predated the incident). An unresolved page swallows the next incident's email (Alertmanager dedup,
+  12 h repeat). Right after a Prometheus restart, "no alerts" doesn't mean clean SLO windows.
 - **Make the game-day fault realistic up front**: a pool of 2 alone didn't hurt P04-lite (its query holds
   a connection for a few ms); exhaustion needs a small pool *and* a slow query (D-36).

@@ -520,3 +520,56 @@ One section per milestone, in the template from `docs/CLOUD_BUILD_PROMPT.md`. Nu
 2. During the outage no pod was replaced, so the file-backed queue on the pod's emptyDir kept everything and drained when the sink returned. Fixing the CA needed a **config change, i.e. a rollout**: new gateway pods got new, empty emptyDirs, and the old pods' queues went with them. Production fix: run the gateway as a StatefulSet with a PVC per replica (stable identity, same volume after a rollout); operationally, let the queue drain before rolling out whenever the cause allows.
 3. The logs pipeline fans out to Loki *and* Splunk from one consumer. If the Splunk exporter blocked when full, it would push back through the pipeline, stall the Loki export and then the receivers: a customer's sink outage would take down Beacon's own observability. Non-blocking keeps the in-cluster path healthy; the queue is sized so a 10-minute outage fits, and `TelemetryQueueFilling` pages well before it's full.
 </details>
+
+## M8 — Profiles (optional), the §7 testing matrix and the game day   (2026-09-28, session 2, tier A)
+
+**Goal / requirement served:** spec M8 (profiles, game day: alert → exemplar → trace → logs), §7 testing matrix with measured values, NFRs (SDK overhead < 5% at 100 req/s, freshness per signal, cardinality < 50k, durability), §8 runbooks, §11 interview notes.
+
+**What we built:**
+- `tests/m8-matrix.sh`: in-cluster k6 at a given rate, per run: achieved rate, failures, p99, cAdvisor CPU per service, head and live series, and a **reset-aware** count of orders server spans in Tempo vs k6 requests. Subcommands `overhead` (SDK on vs `OTEL_SDK_DISABLED=true`) and `chaos` (delete a gateway pod every 2 min).
+- `tests/m8-correlation.py`: §7 correlation, the 20 slowest exemplars → Tempo → Loki by `trace_id`.
+- `tests/m8-gameday.sh` (pool 2 + 30 ms hold), `tests/m8-blind.sh` (random hidden fault, waits for clean SLO windows and no active page in Alertmanager), `tests/gameday-shot.mjs` (screenshot relay for a remote participant), `tests/m8-sink-freshness.sh`.
+- orders 0.2.7: `telemetry.Setup` honours `OTEL_SDK_DISABLED` (Go's SDK doesn't). inventory 0.2.8: `FAULT_DB_SLOW_MS` hook (D-36).
+- `deploy/observability/profiles/profiles.yaml`: Pyroscope 2.3.1 + Alloy v1.19.2 `pyroscope.ebpf` in a PSA-`privileged` namespace. **Written, not applied** (D-33).
+- `scripts/recover.sh`: brings the lab back after a VM reclaim without touching Helm values.
+- Tempo limit 1Gi → 2Gi (D-35). Docs: `docs/evidence/p04/m8-testing-matrix.md`, `docs/INTERVIEW_NOTES.md`, runbook traps in `docs/runbooks/slo-burn.md`.
+
+**Verification (measured; full table in `docs/evidence/p04/m8-testing-matrix.md`):**
+
+| Check | Result |
+|---|---|
+| Load | 100 req/s target, **99.9–100.0 achieved** in-cluster, 0 failed requests in every healthy run |
+| SDK overhead, ratio 1.0 | Go **+16.1%**, Python **+37.8%**: FAIL |
+| SDK overhead, ratio 0.1 | Go **+4.2%** PASS, Python **+16.7%** FAIL (n = 1 × 10 min per arm) |
+| Correlation | **20/20** exemplars → trace (7–9 spans, both services) → 2–3 log lines: PASS |
+| Gateway chaos | run 2: 9 pods deleted, **0.00%** failed, **119,971 spans for 119,971 requests**: PASS (run 1 invalid: Tempo killed, D-35) |
+| Series at 100 req/s | **22,393 live**, head **47,321** (pod churn): PASS, with churn at 94% of the budget |
+| Freshness at 100 req/s | Loki **0.9 s**, trace **1.0 s**, metrics **4.4 s**, customer sink **0.8–1.0 s**: PASS |
+| Game day, detection | page **332 s** after pool 2 (email 350 s); blind fault paged in **110 s** |
+| Game day, people | agent: logs in 52 s, wrong incident; owner: right path in 4 steps, did not finish: **gate NOT MET** (D-37) |
+| Profiles | kernel supports it (BTF, CAP_BPF/PERFMON in the node); privileged DaemonSet refused by the session's permission policy: NOT RUN |
+
+**What broke and how we fixed it:**
+1. *At ratio 1.0 the SDK overhead was 16% (Go) and 38% (Python).* Not a bug but a finding: the chart's own comment said 0.1 at 100 req/s. At 0.1 Go passes and Python still fails, because metrics recording, non-recording spans and log trace lookups don't depend on sampling. Reported, not tuned away.
+2. *Chaos run 1 counted "−22,607 spans".* Tempo was killed by its liveness probe mid-run: compaction took it from 454 MiB to ~1014 MiB of a 1 GiB limit, Go GC thrashed and `/ready` timed out (exit 137, reason `Error`, not OOM). A CPU-starvation hypothesis was checked and refuted (1.6 of 4 cores). Fixes: Tempo 2 GiB (D-35) and a reset-aware span count. Run 2 passed.
+3. *The Tempo freshness test failed "got none".* The Tempo port-forward had died with the resized pod. A test can fail for the wrong reason; re-opened and re-measured (1.0 s).
+4. *`DB_POOL_MAX=2` didn't hurt P04-lite.* Verified in `pg_stat_activity` (2 sessions) and the log; the reservation holds a connection for a few ms. Added a 30 ms hold to baseline and incident, so the pool stays the cause (D-36).
+5. *Killing processes.* `pgrep -f` matched my own shell, and a `$!` that captured a wrapper subshell let a game-day driver survive `kill` and inject a fault unguarded. Rule since then: record PIDs at launch, verify every kill.
+6. *Three VM reclaims in one afternoon.* The kind node container kept etcd, images and volumes, so recovery is restarts only (`scripts/recover.sh`); its first version declared "all pods Ready" from pre-restart statuses, fixed with a 30 s grace and 3 consecutive checks. Each reclaim lost Tempo's last minutes of traces, and Alertmanager's notification log survived and deduplicated a new page for 12 h.
+7. *Participant 2 chose the slowest exemplar of 30 minutes*, which predated the incident. It became a runbook rule: exemplars from the burn window.
+
+**Lab vs customer environment:** at Cobalt the matrix runs on their hardware at their rate, with a CAB-approved load test window. The overhead budget will be argued per runtime; bring the ratio-0.1 numbers and the cause, not a single percentage. Profiles need a written approval for a privileged, host-PID DaemonSet, and many platforms forbid it outright. The game day runs with two of their on-call engineers at a workstation against a persistent cluster, with Alertmanager on a PVC and a page `repeat_interval` they choose. Northstar would run the same drill in Datadog, where the exemplar → trace → logs path is the vendor's.
+
+**Check yourself:**
+1. At sample ratio 0.1, 90% of requests produce no recorded span, yet the Python service still costs +16.7% CPU. Where does that cost come from, and why doesn't sampling remove it?
+2. The first chaos run showed a 5.94% trace gap. Why was it wrong to conclude that deleting gateway pods loses spans?
+3. Why did the blind run's second fault not send any email at first, even though the page was firing in Prometheus?
+4. *What would break in production (§12)?* Pick one lab shortcut from M8 and say how it fails at a customer.
+
+<details><summary>answers</summary>
+
+1. From work done on every request regardless of sampling: the metrics SDK records the HTTP and DB histograms (with attribute sets and exemplar reservoirs), the instrumentors still create non-recording spans and propagate context, and the log formatter looks up the current span for `trace_id`. Sampling only decides whether a span is *recorded and exported*. In CPython all of it runs on the request's event loop, so it shows up directly as CPU.
+2. Because the counter came from Tempo's span-metrics generator, and Tempo itself was killed (liveness probe, memory at its limit) in the middle of the run. The generator's counters restarted from zero and it lost the counts since its last remote write; the gap was Tempo's. Run 2, with Tempo resized, deleted 9 gateway pods and lost 0 of 119,971 spans: the Collector drains its queue on SIGTERM and the SDKs retry onto the other replica.
+3. Alertmanager deduplicates by alert labels. The same `OrdersLatencyBurn/page` had been emailed hours earlier and never resolved from its point of view (the VM restart kept its notification log on an emptyDir), so it waited for `repeat_interval` (12 h). A second cause that arrives while the first page is still firing gets no new email; responders must look at active alerts, not only the inbox.
+4. Examples: the persistent queue and Alertmanager's state on emptyDirs (a rollout or pod replacement drops queued customer logs, D-32, and alert history); Tempo monolithic with its sizing from a lab load test (a compaction at the real rate kills it, D-35, and a node loss drops the live store's recent traces); `NO_PROXY` from the spec (in-cluster traffic silently through the customer's proxy, D-31); the SDK at ratio 1.0 (over the overhead budget; §12 "old names" and "trace-to-logs empty" are the others the runbooks cover).
+</details>

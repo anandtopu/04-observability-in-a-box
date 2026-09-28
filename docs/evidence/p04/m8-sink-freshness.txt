@@ -1,0 +1,6 @@
+16:59:04 == Cobalt overlay on (export-splunk-values.yaml)
+16:59:39 sample 1: order 875fb516-9ec4-47f5-9c71-51ab557037b9 in the customer sink after 1.0 s (NFR < 60 s)
+16:59:45 sample 2: order e6463045-cef2-4fe2-9478-d1d9b7f39283 in the customer sink after 0.8 s (NFR < 60 s)
+16:59:51 sample 3: order acf91b05-d228-403b-985d-767e50765727 in the customer sink after 0.8 s (NFR < 60 s)
+16:59:56 == back to Beacon-only (gateway values only)
+17:00:00 gateway rolled back to Beacon-only

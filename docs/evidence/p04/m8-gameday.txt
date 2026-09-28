@@ -97,3 +97,37 @@
              categorize-labels response flag). The default response flattens structured metadata into "stream".
      note    the orders log line carries ship_to/consignee_name into Beacon's Loki (by design; stripped only
              on the customer export path, M7 transform/pii)
+
+== participant 1: the project owner (human, remote), BLIND run (tests/m8-blind.sh), relay: the guide performed each
+   requested step in the real Grafana (headless Chromium, tests/gameday-shot.mjs) and sent the screenshot
+   fault candidates: A orders 5xx 20% | B orders +400 ms on 50% | C inventory slow query 120 ms (pool 10)
+   void attempt 1 (11:49): an earlier copy of the driver, started just before a VM reclaim, survived a `kill`
+     (its $! was the wrapper subshell) and injected unguarded; no email was sent because Alertmanager still held
+     the 08:52 page (repeat_interval 12h, notification log on an emptyDir that survived the restart). While
+     diagnosing, a guide command printed the fault's env var: the participant may have seen it. Picked: C.
+   attempt 2: restore verified (0 FAULT_* set), waited for clean SLO windows AND no active page in Alertmanager
+     12:32:44 injected (random pick, recorded in a secret file)      12:34:34 page email (t+110 s)
+     15:50:45 participant's "go" arrived: the VM had been reclaimed seconds earlier (idle ~3 h) -> clock void
+     15:57 lab recovered, Alertmanager pod recreated (fresh notification log), Mailpit cleared, load restarted
+     15:58:25 fresh page email                                       15:58:36 page shown to the participant: CLOCK START
+     step 1 15:59:13  "open the RED dashboard, last 15 minutes"                      (+37 s)
+            VM reclaimed while waiting for the next message (reply ~16:33); recovered 16:38:15
+     step 2 16:39:46  "scroll down to the latency p50/p99 panel"
+            VM reclaimed again (~16:45); recovered 16:50:35 (scripts/recover.sh)
+     step 3 16:51-16:52 "click the highest exemplar dot on the orders p99 line"
+            the dot seen (1019 ms, 16:39:39, trace 7fce98d1...) -> Tempo "Not Found": no traces at all for 16:30-16:45,
+            lost from monolithic Tempo's live store in the 16:45 reclaim. Same click on the live panel: 1008 ms,
+            16:51:09, trace cb43003e... (8 spans, 2 services, 2.59 s: orders pool.acquire 700 ms, HTTP POST 300 ms ERROR
+            "context deadline exceeded", inventory POST /v1/reservations 1.88 s with a 128.9 ms SELECT)
+     step 4 16:56:06  "click Logs for this span on the HTTP POST span" -> Grafana 13 labels it "Logs for this trace"
+            (tracesToLogsV2 filterByTraceID only); Loki split pane, 2 lines: "order accepted" (info) and, one scroll
+            below, "inventory precheck degraded ... context deadline exceeded" (warn)
+     16:58 the participant ended the drill before naming the span; fault revealed: C (same as the void attempt)
+   RESULT: NOT COMPLETED. 4 relay steps, the path was right (latency panel -> slowest orders exemplar -> the error
+     span -> its logs, one scroll from the answer). Wall time is not meaningful: 3 VM reclaims during the run and
+     chat round trips of minutes to hours. "< 2 min per person" is NOT demonstrated by this lab.
+   answer key: failing span = orders "HTTP POST" (client, 300 ms deadline, ERROR); cause = inventory's slow query
+     holding pool connections (inventory POST /v1/reservations 1.88 s, 503 "db pool exhausted" for the requests
+     that time out waiting); log = orders warn "inventory precheck degraded" with err "context deadline exceeded".
+
+== customer sink freshness (tests/m8-sink-freshness.sh, Cobalt overlay on, then rolled back): 1.0 / 0.8 / 0.8 s
