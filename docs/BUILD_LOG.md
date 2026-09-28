@@ -453,3 +453,70 @@ One section per milestone, in the template from `docs/CLOUD_BUILD_PROMPT.md`. Nu
 2. 0.1% errors against a 99.9% objective is exactly 1× burn: you'll spend exactly the whole monthly budget. That's not an emergency (nothing about the next hour is worse than planned), so no page. It *is* worth a ticket, because there's no headroom left for anything else this month. Paging on it would teach on-call to ignore pages.
 3. No. The formula `60 × 14.4 / B` describes the *first* pair (1 h and 5 m) starting from a clean, **full** history. Here the *second* pair (6 h and 30 m at 6×) fired first, because the 6 h window held only sparse lab traffic. With 6 hours of steady history (the promtool case), the latency page fires between 5 and 12 minutes, as the formula predicts.
 </details>
+
+## M7 — Customer export mode   (2026-09-28, session 1, tier A)
+
+**Goal / requirement served:** FR-7 (an overlay adds Splunk HEC or Datadog exporters with PII removal, a persistent queue and proxy/CA support), ADR-P04-1 (a customer backend is a values overlay), success criterion 4 (values change only; counts within 0.1%; no log loss across a 10-minute sink outage), §9 (information disclosure, credential exposure).
+
+**What we built:**
+- `deploy/observability/customer-sim-values.yaml`: the Splunk stand-in. A Collector with `splunk_hec` receivers (:8088 plain; :8089 TLS as `hec.cobalt.example`), a file exporter, an inspector sidecar, and a ServiceMonitor.
+- `deploy/observability/export-splunk-values.yaml`: the Cobalt profile. The spec's overlay plus two gap fixes: `transform/pii` (body redaction, D-27) and the queue sized in records (200k, D-29).
+- `deploy/observability/export-splunk-proxy-values.yaml`: Cobalt at-site additions, as a third values file. `HTTPS_PROXY`, a widened `NO_PROXY` (D-31), the inspection CA via `tls.ca_file`, the TLS endpoint. It restates the lists it replaces (token env, queue volume).
+- `deploy/observability/proxy-sim/`: mitmproxy 12.2.3 as Cobalt's TLS-inspecting proxy. `install.sh` generates the CAs and the server certificate into Secrets (never committed); the gateway gets only the CA certificate.
+- `deploy/observability/export-datadog-values.yaml`: the Northstar profile, `datadog/connector` + `datadog/northstar`, render + validate only.
+- `tests/sink-outage.sh`: §7's parity and outage test. `load/steady.js` seeds a canary consignee name (`SEEDED_CONSIGNEE`).
+
+**How the data flows (export mode):**
+1. The agent ships each JSON log line; `json_parser` has copied its fields into attributes and **left the original line in the body**.
+2. The gateway's logs pipeline: `memory_limiter` → `k8s_attributes` → `resource` → **`attributes/pii`** (deletes the `ship_to`/`consignee_name` attributes) → **`transform/pii`** (redacts both values inside the body) → fan-out.
+3. Fan-out: `otlp_http/loki` (in-cluster) **and** `splunk_hec/cobalt`. Both receive the same redacted record, which is why parity is exact and the canary is gone from both.
+4. `splunk_hec/cobalt` puts records in a **file-backed queue** (`file_storage` on an emptyDir, sized in records). Consumers batch and POST to HEC; on failure they retry forever (`max_elapsed_time: 0`) while the queue holds the backlog. If the queue fills, new records are **dropped** (`block_on_overflow: false`), deliberately, so a customer sink can never stall the Loki path.
+5. At the site: the POST goes to `HTTPS_PROXY` as a CONNECT to `hec.cobalt.example:8089`. The proxy terminates TLS with a certificate signed by the **Cobalt TLS Inspection CA** (trusted via `tls.ca_file`), inspects it, and opens its own TLS to the real HEC (which it verifies against the Splunk server CA). Everything in-cluster bypasses the proxy through `NO_PROXY`.
+6. Helm layering: base values ← Cobalt profile ← site additions. **Maps merge** (the exporter keeps its queue and token when the site file changes its endpoint and TLS). **Lists replace** (`extraEnvs`, `extraVolumes`, the pipeline's processors and exporters are restated each time).
+
+**Commands run, in order:**
+
+| Command | What it does | Key output |
+|---|---|---|
+| `helm template … -f gateway -f export-splunk` + `otelcol-contrib validate` | Checks the merge | Only the logs pipeline changed; receivers inherited; validate exit 0 (with the queue dir present) |
+| §6 sequence: snapshot → Secret → `helm install customer-sim` → `helm upgrade otel-gateway … -f export-splunk-values.yaml` → `diff` | The spec's gate | **empty diff** (exit 0) (`docs/evidence/p04/m7-gate-diff.txt`) |
+| k6 with `SEEDED_CONSIGNEE`, search sink and Loki | §7 PII test on the spec's overlay | **leak: 53/178 sink batches, 63 Loki lines** |
+| Local Collector 0.161 with the rendered `transform/pii` | Offline test of the fix | body redacted, 0 fragments of a quoted canary |
+| Upgrade, fresh sink, new quoted canary | §7 PII test after the fix | **0 fragments** in sink (181 batches) and Loki; 601 lines `[REDACTED]` (`m7-pii.txt`) |
+| 3-min outage probe | Sizing check | +184 batches/min vs capacity 1000 → overflow at ~5.4 min |
+| `bash tests/sink-outage.sh` (30 min, 10-min outage) | §7 parity and outage | see Verification (`m7-sink-outage.txt`) |
+| `bash deploy/observability/proxy-sim/install.sh`; overlay without, then with, the CA | Proxy/CA | x509 reproduced; then 171 POST 200/min via the proxy (`m7-proxy.txt`) |
+| `helm rollback otel-gateway 2` + `diff` | §6 rollback | Beacon-only exporters; apps untouched (`m7-rollback.txt`) |
+
+**Verification:**
+- *Spec gate 1:* `diff before.txt -` is **empty** after the overlay, after the PII fix, and after 5 export revisions plus the rollback. **PASS.**
+- *Spec gate 2 / §7 parity (30-min k6, 10 req/s, customer-sim at 0 for 10 min):* sent to Loki **36,034**, to Splunk **36,034** (received 36,027 in the window; counter extrapolation). The spec's query with corrected names: 33,193 = 33,193 over the last 30 min. **PASS (< 0.1%).**
+- *§7 outage:* 0 send failures, **0 enqueue failures**, 0 gateway restarts; the queue peaked at **11,776** records and **drained in 50 s**. **PASS (< 5 min).**
+- *§7 PII:* seeded canary: **0** fragments in the sink and in Loki with `transform/pii`. **PASS** after fixing a real leak in the spec's overlay.
+- *Proxy/CA:* without the CA, `x509: certificate signed by unknown authority` (the §12 failure) with the matching proxy-side log; with it, exports flow through the proxy (audit trail) and nothing in-cluster does.
+- *Northstar:* renders and validates on 0.161.0 (no Datadog account; labelled render-only).
+
+**What broke and how we fixed it:**
+1. *The spec's PII control leaked.* `attributes/pii` removes attributes, but the JSON body still carried both values: 53 of 178 sink batches held the canary. **The config looked right; only a seeded canary proved it wrong.** Fix: `transform/pii` with an escaped-quote-safe regex, tested offline first, then end to end (D-27).
+2. *The spec's queue would lose data in the outage it's meant to survive.* The default is 1000 *batches*; the probe measured 184/min at 10 req/s, so it's full after about 5.4 minutes. Fix: size in records (200k) for the 100 req/s target; keep `block_on_overflow: false` so Loki never stalls (D-29).
+3. *`--set replicaCount=0` doesn't scale the upstream chart to 0* (`if … (.Values.replicaCount)`: 0 is falsy). Same trap as our M5 library-chart bug; used `kubectl scale` 0 → 1 on the simulator (D-28).
+4. *The inspector sidecar's image wasn't on the node* (`ErrImagePull`): side-loaded, and added to the M7 list.
+5. *The spec's `NO_PROXY` silently routed traces through the proxy* (`tempo.monitoring` matches neither `.svc` nor `.cluster.local`, and gRPC honours `HTTPS_PROXY`). Visible **only** in the proxy's log. Fix: namespace suffixes + CIDRs (D-31).
+6. *mitmproxy logged nothing*: Python buffers stdout without a TTY. `PYTHONUNBUFFERED=1` produced the audit trail.
+7. *The export retry is logged at INFO*, so my warn/error filter missed the x509 cause. The runbook now greps `Exporting failed`.
+8. *Fixing the CA lost the queued data.* The rollout replaced the pods, and the emptyDir queue (3,866 records) went with them. Measured and recorded; **recommendation: StatefulSet + PVC before any customer go-live** (D-32).
+9. *The Datadog exporter probed EC2 IMDS during `validate`.* An explicit `hostname` removed one of two probes; one remains (likely the connector). Open item for Northstar's network team.
+
+**Lab vs customer environment:** at Cobalt the only things that change are values: the real HEC endpoint and index, the token in their secret store (External Secrets, P05), their proxy address, their CA bundle, and their `NO_PROXY` (ask for the service and pod CIDRs up front). The CAB reviews `export-splunk-values.yaml` + `export-splunk-proxy-values.yaml` and the rendered diff, never code. Their SOC will ask for: the PII canary evidence (not the config), the ingest volume per day (Splunk bills per GB; our lab rate is ~20 records/s ≈ 1.7M records/day before any filtering), what happens during their maintenance windows (the queue: 200k records ≈ 2.8 h at 20/s, ≈ 17 min at the 100 req/s target), and the proxy audit trail. Northstar is the same shape with `export-datadog-values.yaml`, a real key in their secret store, and a decision on the remaining IMDS probe.
+
+**Check yourself:**
+1. The spec's overlay has an `attributes/pii` processor that deletes `consignee_name`. Why did the canary still reach Splunk, and why wouldn't a config review have caught it?
+2. The persistent queue survived a 10-minute outage with zero loss, yet lost 3,866 records later that hour. What was different, and what's the production fix?
+3. Why is `block_on_overflow: false` the right choice here, even though it means dropping data when the queue is full?
+
+<details><summary>answers</summary>
+
+1. The agent's `json_parser` copies each JSON field into an attribute but leaves the **original line in the body**. `attributes/pii` deleted the attribute copies while the body, the part Splunk actually indexes and displays, still held `"consignee_name":"…"`. A reviewer sees a processor that "deletes consignee_name" and approves it. Only sending a known canary through the real pipeline and searching the sink shows what leaves the cluster, which is why §7 specifies a seeded search, not a config check.
+2. During the outage no pod was replaced, so the file-backed queue on the pod's emptyDir kept everything and drained when the sink returned. Fixing the CA needed a **config change, i.e. a rollout**: new gateway pods got new, empty emptyDirs, and the old pods' queues went with them. Production fix: run the gateway as a StatefulSet with a PVC per replica (stable identity, same volume after a rollout); operationally, let the queue drain before rolling out whenever the cause allows.
+3. The logs pipeline fans out to Loki *and* Splunk from one consumer. If the Splunk exporter blocked when full, it would push back through the pipeline, stall the Loki export and then the receivers: a customer's sink outage would take down Beacon's own observability. Non-blocking keeps the in-cluster path healthy; the queue is sized so a 10-minute outage fits, and `TelemetryQueueFilling` pages well before it's full.
+</details>

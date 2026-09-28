@@ -1,0 +1,73 @@
+05:30:33 == start: gateway pods otel-gateway-7d65658449-j4xjl=0 otel-gateway-7d65658449-vv5sq=0 
+05:30:33 k6 started: 10 req/s for 30 min
+   +0m0s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +0m30s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +1m0s queue(splunk items)=4 capacity=200000 send_failed=0 enqueue_failed=0
+   +1m30s queue(splunk items)=4 capacity=200000 send_failed=0 enqueue_failed=0
+   +2m0s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +2m31s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +3m1s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +3m31s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +4m1s queue(splunk items)=4 capacity=200000 send_failed=0 enqueue_failed=0
+   +4m31s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+05:35:34 == OUTAGE: customer-sim scaled to 0
+   +5m1s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +5m31s queue(splunk items)=376 capacity=200000 send_failed=0 enqueue_failed=0
+   +6m1s queue(splunk items)=972 capacity=200000 send_failed=0 enqueue_failed=0
+   +6m31s queue(splunk items)=1576 capacity=200000 send_failed=0 enqueue_failed=0
+   +7m1s queue(splunk items)=2176 capacity=200000 send_failed=0 enqueue_failed=0
+   +7m31s queue(splunk items)=2774 capacity=200000 send_failed=0 enqueue_failed=0
+   +8m1s queue(splunk items)=3372 capacity=200000 send_failed=0 enqueue_failed=0
+   +8m31s queue(splunk items)=3976 capacity=200000 send_failed=0 enqueue_failed=0
+   +9m1s queue(splunk items)=4572 capacity=200000 send_failed=0 enqueue_failed=0
+   +9m31s queue(splunk items)=5172 capacity=200000 send_failed=0 enqueue_failed=0
+   +10m1s queue(splunk items)=5772 capacity=200000 send_failed=0 enqueue_failed=0
+   +10m32s queue(splunk items)=6372 capacity=200000 send_failed=0 enqueue_failed=0
+   +11m2s queue(splunk items)=6972 capacity=200000 send_failed=0 enqueue_failed=0
+   +11m32s queue(splunk items)=7572 capacity=200000 send_failed=0 enqueue_failed=0
+   +12m2s queue(splunk items)=8176 capacity=200000 send_failed=0 enqueue_failed=0
+   +12m32s queue(splunk items)=8776 capacity=200000 send_failed=0 enqueue_failed=0
+   +13m2s queue(splunk items)=9376 capacity=200000 send_failed=0 enqueue_failed=0
+   +13m32s queue(splunk items)=9972 capacity=200000 send_failed=0 enqueue_failed=0
+   +14m2s queue(splunk items)=10572 capacity=200000 send_failed=0 enqueue_failed=0
+   +14m32s queue(splunk items)=11176 capacity=200000 send_failed=0 enqueue_failed=0
+05:45:36 == RECOVERY: customer-sim back (ready); queue at 11776 items
+05:46:26 queue drained to 0 in 50s after the sink returned (Prometheus scrape interval 30 s bounds the precision)
+   +15m53s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +16m24s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +16m54s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +17m24s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +17m54s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +18m24s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +18m54s queue(splunk items)=4 capacity=200000 send_failed=0 enqueue_failed=0
+   +19m24s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +19m54s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +20m24s queue(splunk items)=4 capacity=200000 send_failed=0 enqueue_failed=0
+   +20m54s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +21m24s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +21m54s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +22m24s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +22m54s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +23m24s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +23m54s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +24m25s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +24m55s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +25m25s queue(splunk items)=4 capacity=200000 send_failed=0 enqueue_failed=0
+   +25m55s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +26m25s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +26m55s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +27m25s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +27m55s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +28m25s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +28m55s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +29m25s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +29m55s queue(splunk items)=8 capacity=200000 send_failed=0 enqueue_failed=0
+   +30m25s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+   +30m55s queue(splunk items)=0 capacity=200000 send_failed=0 enqueue_failed=0
+06:02:58 == PARITY over the run (2005s window): received by gateway=36027 sent to Loki=36034 sent to Splunk=36034
+   difference 0.0006% (pass < 0.1%): PASS
+   the spec's query, corrected names (D-20): sum by (exporter) (increase(otelcol_exporter_sent_log_records[30m]))
+     splunk_hec/cobalt 33193
+     otlp_http/loki 33193
+06:02:58 send_failed (splunk)=0 enqueue_failed (all)=0
+06:02:58 == end: gateway pods otel-gateway-7d65658449-j4xjl=0 otel-gateway-7d65658449-vv5sq=0  (a restart would have emptied the emptyDir queue)

@@ -1,0 +1,28 @@
+# Cobalt at-site additions (M7), applied as a THIRD values file after export-splunk-values.yaml:
+#   helm upgrade otel-gateway open-telemetry/opentelemetry-collector --version 0.173.1 -n observability \
+#     -f deploy/observability/otel-gateway-values.yaml -f deploy/observability/export-splunk-values.yaml \
+#     -f deploy/observability/export-splunk-proxy-values.yaml
+# All egress crosses Cobalt's TLS-inspecting proxy (simulated by proxy-sim, which re-signs TLS with the
+# "Cobalt TLS Inspection CA"). extraEnvs / extraVolumes / extraVolumeMounts are LISTS: this file
+# replaces them, so it restates the HEC token and the persistent-queue volume from the Cobalt profile.
+extraEnvs:
+  - name: SPLUNK_HEC_TOKEN                                   # restated (list replace)
+    valueFrom: { secretKeyRef: { name: customer-splunk-hec, key: token } }
+  - { name: HTTPS_PROXY, value: "http://proxy-sim.proxy-sim:8080" }
+  # In-cluster traffic must not go to the proxy. The spec's ".svc,.cluster.local" is NOT enough
+  # (DEVIATIONS D-31): the gateway's own endpoints use short names (tempo.monitoring:4317), which
+  # match neither suffix, and gRPC honours HTTPS_PROXY, so traces to Tempo went through the proxy
+  # (mitmproxy log: "-> tcp -> tempo.monitoring:4317" x74). Add the namespaces' short suffixes and
+  # the service and pod CIDRs (kind defaults; ask the customer for theirs).
+  - { name: NO_PROXY, value: ".svc,.cluster.local,.monitoring,.observability,10.96.0.0/12,10.244.0.0/16" }
+extraVolumes:
+  - { name: queue, emptyDir: {} }                            # restated (list replace): the persistent queue
+  - { name: cobalt-ca, secret: { secretName: cobalt-proxy-ca } }   # certificate only, no key
+extraVolumeMounts:
+  - { name: queue, mountPath: /var/lib/otelcol/queue }
+  - { name: cobalt-ca, mountPath: /etc/cobalt-ca, readOnly: true }
+config:
+  exporters:
+    splunk_hec/cobalt:                                       # maps merge: only these keys change
+      endpoint: https://hec.cobalt.example:8089/services/collector
+      tls: { ca_file: /etc/cobalt-ca/ca.crt }                # trust the proxy's re-signing CA; never insecure_skip_verify

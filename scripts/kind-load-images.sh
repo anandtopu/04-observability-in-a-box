@@ -43,12 +43,19 @@ M3=(
   docker.io/grafana/loki:3.7.8
 )
 
+# M7: the TLS-inspecting proxy simulation (customer-sim reuses the Collector image from M1).
+M7=(
+  docker.io/mitmproxy/mitmproxy:12.2.3
+  ghcr.io/astral-sh/uv:python3.14-bookworm-slim   # customer-sim inspector sidecar (shell + grep)
+)
+
 case "${1:-all}" in
   m0) IMAGES=("${M0[@]}") ;;
   m1) IMAGES=("${M1[@]}") ;;
   m2) IMAGES=("${M2[@]}") ;;
   m3) IMAGES=("${M3[@]}") ;;
-  all) IMAGES=("${M0[@]}" "${M1[@]}" "${M2[@]}" "${M3[@]}") ;;
+  m7) IMAGES=("${M7[@]}") ;;
+  all) IMAGES=("${M0[@]}" "${M1[@]}" "${M2[@]}" "${M3[@]}" "${M7[@]}") ;;
   *) echo "unknown set: $1" >&2; exit 2 ;;
 esac
 

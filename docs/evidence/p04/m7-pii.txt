@@ -1,0 +1,6 @@
+== PII canary test after the fix (attributes/pii + transform/pii), canary: Yolanda "Canary" Pemberton-Quist, seeded into ~10% of 600 orders
+app stdout (orders pod, in-cluster only): 63 lines contain the canary (expected > 0: the app logs it on purpose)
+sink: 181 record batches received; canary fragments (Yolanda|Pemberton|Canary): 0
+sink sample: consignee_name\":\"[REDACTED]\",\"trace_id\":\"6b7db8040af37d4567f1058aab79db03\"
+consignee_name\":\"[REDACTED]\",\"trace_id\":\"56a6999302bc09222e895b7661b8c5b7\"
+Loki (since 05:21:27): 0 lines with canary fragments; 601 orders lines carry [REDACTED]

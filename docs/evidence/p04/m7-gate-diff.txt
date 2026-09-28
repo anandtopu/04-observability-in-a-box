@@ -1,0 +1,5 @@
+$ kubectl -n freightline get pods -o custom-columns=POD:.metadata.name,STARTED:.status.startTime,IMAGE:.spec.containers[0].image | diff before.txt -
+diff exit code: 0 (0 = no output = no pod or image change)
+(re-run after deleting the finished k6 test Job, whose pod lives in the freightline namespace)
+$ kubectl -n freightline get pods -o custom-columns=POD:.metadata.name,STARTED:.status.startTime,IMAGE:.spec.containers[0].image | diff before.txt -
+diff exit code: 0 (after gateway revisions 3 and 4: the overlay and the PII fix)

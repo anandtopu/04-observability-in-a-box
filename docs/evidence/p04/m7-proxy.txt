@@ -1,0 +1,17 @@
+== proxy/CA experiments (M7)
+A: proxy overlay WITHOUT the CA (applied 06:03:52), spec NO_PROXY=.svc,.cluster.local
+   gateway, 'Exporting failed' x10 in 4 min (logged at INFO level):
+     Post "https://hec.cobalt.example:8089/services/collector": tls: failed to verify certificate: x509: certificate signed by unknown authority
+   proxy-sim: 18x "Client TLS handshake failed. The client does not trust the proxy's certificate for hec.cobalt.example"
+   proxy-sim: 74x "-> tcp -> tempo.monitoring:4317"  (NO_PROXY .svc,.cluster.local does not match the short name)
+   splunk queue grew to 3866 records; LOST at the fixing rollout (the queue's emptyDir belongs to the old pod)
+== experiment B (CA trusted, NO_PROXY widened), 06:08:20, rollout at 06:07:14
+gateway retry errors in the last 60 s: 0
+splunk queue: 8   sent to splunk since rollout: 1288
+sink received on the TLS listener (splunk_hec/tls): 1224
+--- proxy-sim, last 60 s:
+    171 [<ip>] server disconnect hec.cobalt.example:8089 (<ip>)
+    171 [<ip>] server connect hec.cobalt.example:8089 (<ip>)
+    171 <ip>: POST https://hec.cobalt.example:8089/services/collector HTTP/2.0
+    171         << HTTP/2.0 200 OK 30b
+tempo via proxy in the last 60 s: 0

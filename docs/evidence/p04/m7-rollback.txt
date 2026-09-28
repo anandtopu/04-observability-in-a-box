@@ -1,0 +1,4 @@
+== rollback to Beacon-only mode (spec section 6): helm rollback otel-gateway 2
+gateway exporters now: ['debug', 'otlp_grpc/tempo', 'otlp_http/loki', 'otlp_http/prometheus']
+$ kubectl -n freightline get pods -o custom-columns=POD:...,STARTED:...,IMAGE:... | diff before.txt -   (before.txt taken 05:14, before the first overlay)
+diff exit code: 0 (5 gateway revisions of export mode + rollback; apps untouched)

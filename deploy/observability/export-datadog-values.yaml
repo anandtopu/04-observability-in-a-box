@@ -1,0 +1,47 @@
+# Northstar profile (spec section 5, M7): overlays the otel-gateway release, like the Cobalt profile.
+# datadog/connector computes APM stats (the exporter no longer does by default): it EXPORTS from the
+# traces pipeline and RECEIVES into the metrics pipeline. One datadog/northstar exporter takes all
+# three signals. PII removal is the same as Cobalt's. Every list touched is restated in full.
+#   helm upgrade otel-gateway open-telemetry/opentelemetry-collector --version 0.173.1 -n observability \
+#     -f deploy/observability/otel-gateway-values.yaml -f deploy/observability/export-datadog-values.yaml
+# Lab status: rendered and validated only (no Datadog account; CLAUDE.md forbids real vendor keys in
+# the repo). A real trial key goes only in a cloud-environment secret -> Secret customer-datadog.
+extraEnvs:
+  - name: DD_API_KEY
+    valueFrom: { secretKeyRef: { name: customer-datadog, key: api-key } }
+  # Egress to Datadog crosses Northstar's proxy too: HTTPS_PROXY + NO_PROXY as in the Cobalt proxy overlay.
+extraVolumes: [{ name: queue, emptyDir: {} }]            # production: statefulset mode + PVC
+extraVolumeMounts: [{ name: queue, mountPath: /var/lib/otelcol/queue }]
+config:
+  extensions:
+    file_storage/queue: { directory: /var/lib/otelcol/queue }
+  connectors:
+    datadog/connector: {}
+  processors:
+    attributes/pii:
+      actions: [{ key: ship_to, action: delete }, { key: consignee_name, action: delete }]
+    transform/pii:                                          # see export-splunk-values.yaml (D-27)
+      error_mode: ignore
+      log_statements:
+        - context: log
+          statements:
+            - 'replace_pattern(body, "\"(ship_to|consignee_name)\":\"(?:[^\"\\\\]|\\\\.)*\"", "\"$$1\":\"[REDACTED]\"")'
+  exporters:
+    datadog/northstar:
+      api: { site: datadoghq.com, key: "${env:DD_API_KEY}" }
+      # An explicit hostname stops the exporter probing cloud metadata (EC2 IMDS at 169.254.169.254)
+      # to detect one: a surprise egress call a SOC would flag (seen in otelcol validate, M7).
+      hostname: "${env:OTEL_K8S_NODE_NAME}"
+      sending_queue: { storage: file_storage/queue, sizer: items, queue_size: 200000, batch: {} }
+      retry_on_failure: { max_elapsed_time: 0s }
+  service:
+    extensions: [health_check, file_storage/queue]
+    pipelines:
+      traces:
+        exporters: [otlp_grpc/tempo, datadog/connector, datadog/northstar]
+      metrics:
+        receivers: [otlp, datadog/connector]
+        exporters: [otlp_http/prometheus, datadog/northstar]
+      logs:
+        processors: [memory_limiter, k8s_attributes, resource, attributes/pii, transform/pii]
+        exporters: [otlp_http/loki, datadog/northstar]

@@ -1,0 +1,5 @@
+POD                          STARTED                IMAGE
+inventory-67d57c6b74-c94fs   2026-09-28T04:12:58Z   freightline/inventory:0.2.6
+mailpit-586984d894-m5sb4     2026-09-27T17:57:27Z   ghcr.io/axllent/mailpit:v1.31
+orders-b5fdf78c9-gccx7       2026-09-28T04:54:33Z   freightline/orders:0.2.6
+postgres-0                   2026-09-27T18:22:44Z   ghcr.io/cloudnative-pg/postgresql:18

@@ -1,0 +1,50 @@
+# Cobalt profile (spec section 5, M7): overlays the otel-gateway release. Helm merges maps and
+# replaces lists, so this names only what changes, and restates every list it touches in full
+# (service.extensions, the logs pipeline's processors and exporters).
+#   helm upgrade otel-gateway open-telemetry/opentelemetry-collector --version 0.173.1 -n observability \
+#     -f deploy/observability/otel-gateway-values.yaml -f deploy/observability/export-splunk-values.yaml
+# The HEC token is a Secret (never in values):
+#   kubectl -n observability create secret generic customer-splunk-hec --from-literal=token=lab-only-token
+extraEnvs:
+  - name: SPLUNK_HEC_TOKEN
+    valueFrom: { secretKeyRef: { name: customer-splunk-hec, key: token } }
+  # At Cobalt also: HTTPS_PROXY=http://<proxy>:8080 and NO_PROXY=.svc,.cluster.local
+extraVolumes: [{ name: queue, emptyDir: {} }]            # production: statefulset mode + PVC
+extraVolumeMounts: [{ name: queue, mountPath: /var/lib/otelcol/queue }]
+config:
+  extensions:
+    file_storage/queue: { directory: /var/lib/otelcol/queue }
+  processors:
+    attributes/pii:
+      actions: [{ key: ship_to, action: delete }, { key: consignee_name, action: delete }]
+    # Not in the spec (DEVIATIONS D-27): attributes/pii only deletes the attributes json_parser
+    # extracted; the original JSON line stays in the log BODY with both values (M7 canary test: 53 of
+    # 178 records in the sink still carried the seeded consignee name). This redacts them inside the
+    # body. The value regex handles escaped quotes ("A \"B\" C"), so no fragment of a name survives.
+    # $$1 -> $1 after the Collector's config expansion ($$ is a literal $).
+    transform/pii:
+      error_mode: ignore
+      log_statements:
+        - context: log
+          statements:
+            - 'replace_pattern(body, "\"(ship_to|consignee_name)\":\"(?:[^\"\\\\]|\\\\.)*\"", "\"$$1\":\"[REDACTED]\"")'
+  exporters:
+    splunk_hec/cobalt:
+      endpoint: http://customer-sim.customer-sim:8088/services/collector   # Cobalt: https://<hec-host>:8088/...
+      token: ${env:SPLUNK_HEC_TOKEN}
+      index: freightline
+      sourcetype: freightline:otel
+      # tls: { ca_file: /etc/cobalt-ca/ca.crt }   # the proxy re-signs TLS with Cobalt's CA
+      # Sized for the NFR's 10-minute sink outage (DEVIATIONS D-29). The default queue holds 1000
+      # REQUESTS (batches); the M7 probe measured ~184 batches/min at only 10 req/s, so a 10-minute
+      # outage overflows it after ~5.4 min and drops everything after that. Sized in log records:
+      # 100 req/s target -> ~200 logs/s x 600 s = 120k; 200k gives headroom (~300 MB on the queue volume).
+      # block_on_overflow stays false: blocking would stall the whole logs pipeline, Loki included.
+      sending_queue: { storage: file_storage/queue, sizer: items, queue_size: 200000, batch: {} }
+      retry_on_failure: { max_elapsed_time: 0s }  # retry until the persistent queue fills
+  service:
+    extensions: [health_check, file_storage/queue]
+    pipelines:
+      logs:
+        processors: [memory_limiter, k8s_attributes, resource, attributes/pii, transform/pii]
+        exporters: [otlp_http/loki, splunk_hec/cobalt]

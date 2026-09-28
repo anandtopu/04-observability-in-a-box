@@ -28,7 +28,7 @@ The target is spec section 3. This file tracks what exists today; `[x]` means bu
                                   [x] Loki 3.7.8 monolithic: OTLP /otlp :3100, trace_id/span_id as
                                       structured metadata, service_name indexed, 12h retention (M3)
                                   [ ] kube-state-metrics (D-14)
- TRUST BOUNDARY: customer egress  [ ] export overlay + customer-sim + proxy-sim (M7)
+ TRUST BOUNDARY: customer egress  [x] export overlay (values only) + customer-sim + proxy-sim (M7)
 
  Runtime: kind "freightline", 1 node, Kubernetes v1.36.4, containerd 2.3.4 (Tier A)
 ```
@@ -93,3 +93,19 @@ All three carry **rollout annotations** derived from `target_info` (a new `freig
 | requests-latency | 99% | requests in `le="0.25"` / all | same factors | same factors |
 
 Routing (M2): `severity=page` → `page@lab.local`, otherwise → `ticket@lab.local`. Measured (M6, live): 0.1% for 20 min → no page; 50% → page firing in 60 s, email in 90 s, resolved 30 m 23 s after the fix (the 6×/30 m pair); +300 ms on every request → page firing in 211 s, email in 236 s.
+
+## Customer export mode (M7)
+
+```text
+ otel-gateway (+ export-splunk-values.yaml [+ export-splunk-proxy-values.yaml at the site])
+   logs: memory_limiter > k8s_attributes > resource > attributes/pii > transform/pii
+         ├─> otlp_http/loki      (in-cluster)
+         └─> splunk_hec/cobalt   sending_queue: file_storage (emptyDir), sizer items, 200k; retry forever
+               lab:  http://customer-sim.customer-sim:8088/services/collector
+               site: https://hec.cobalt.example:8089 via HTTPS_PROXY=proxy-sim:8080 (re-signs TLS with the
+                     Cobalt TLS Inspection CA; trusted via tls.ca_file); NO_PROXY covers in-cluster names + CIDRs
+ customer-sim: Collector with splunk_hec receivers (:8088 plain, :8089 TLS as hec.cobalt.example), file exporter
+ Northstar: export-datadog-values.yaml (datadog/connector traces->metrics, datadog/northstar), validated only
+```
+
+Measured: app pods unchanged across 5 export revisions and the rollback (`diff` empty); PII canary 0 fragments in sink and Loki after `transform/pii`; 30-min parity Loki 36,034 = Splunk 36,034; 10-min sink outage: 0 lost, 11,776 queued, drained in 50 s; proxy mode: 171 POST 200 per minute through the proxy, 0 in-cluster connections through it.

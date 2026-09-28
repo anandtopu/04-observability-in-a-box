@@ -1,0 +1,48 @@
+# proxy-sim: mitmproxy as Cobalt's TLS-inspecting egress proxy (M7). Applied by install.sh, which
+# fills in customer-sim's ClusterIP for hec.cobalt.example.
+apiVersion: v1
+kind: Service
+metadata: { name: proxy-sim, namespace: proxy-sim }
+spec:
+  selector: { app.kubernetes.io/name: proxy-sim }
+  ports: [{ name: proxy, port: 8080, targetPort: 8080 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: proxy-sim, namespace: proxy-sim, labels: { app.kubernetes.io/name: proxy-sim } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: proxy-sim } }
+  template:
+    metadata: { labels: { app.kubernetes.io/name: proxy-sim } }
+    spec:
+      hostAliases:                          # "the internet" as seen from Cobalt's proxy
+        - { ip: "__CUSTOMER_SIM_IP__", hostnames: [hec.cobalt.example] }
+      initContainers:
+        - name: conf                        # mitmproxy writes into its confdir, so copy the CA to an emptyDir
+          image: docker.io/mitmproxy/mitmproxy:12.2.3
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "cp /ca/mitmproxy-ca.pem /conf/"]
+          volumeMounts: [{ name: ca, mountPath: /ca }, { name: conf, mountPath: /conf }]
+      containers:
+        - name: mitmproxy
+          image: docker.io/mitmproxy/mitmproxy:12.2.3
+          imagePullPolicy: IfNotPresent
+          args:
+            - mitmdump
+            - --mode=regular
+            - --listen-port=8080
+            - --set=confdir=/conf
+            - --set=ssl_verify_upstream_trusted_ca=/upstream-ca/ca.crt   # verify the real HEC server cert
+            - --set=flow_detail=1                                       # one line per request: the audit trail
+          env:
+            - { name: PYTHONUNBUFFERED, value: "1" }   # without a TTY, Python buffers stdout: no audit trail at all (M7)
+          ports: [{ containerPort: 8080 }]
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 256Mi } }
+          volumeMounts:
+            - { name: conf, mountPath: /conf }
+            - { name: upstream-ca, mountPath: /upstream-ca, readOnly: true }
+      volumes:
+        - { name: ca, secret: { secretName: proxy-ca } }
+        - { name: conf, emptyDir: {} }
+        - { name: upstream-ca, secret: { secretName: splunk-server-ca } }

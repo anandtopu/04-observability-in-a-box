@@ -1,0 +1,59 @@
+# customer-sim: the lab stand-in for Cobalt's Splunk (spec M7): a third release of the Collector chart
+# with only a splunk_hec receiver on :8088. It writes every record it receives to a JSONL file so the
+# M7 tests can count records and search for PII; the inspector sidecar has the shell the distroless
+# Collector image lacks. Its own otelcol_receiver_* metrics are the sink-side count.
+#   helm install customer-sim open-telemetry/opentelemetry-collector --version 0.173.1 \
+#     -n customer-sim --create-namespace -f deploy/observability/customer-sim-values.yaml
+mode: deployment
+replicaCount: 1
+fullnameOverride: customer-sim
+image: { repository: otel/opentelemetry-collector-contrib, tag: "0.161.0" }
+command: { name: otelcol-contrib }
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { memory: 512Mi }
+ports:
+  otlp: { enabled: false }
+  otlp-http: { enabled: false }
+  jaeger-compact: { enabled: false }
+  jaeger-thrift: { enabled: false }
+  jaeger-grpc: { enabled: false }
+  zipkin: { enabled: false }
+  metrics: { enabled: true }
+  hec: { enabled: true, containerPort: 8088, servicePort: 8088, protocol: TCP }
+  hec-tls: { enabled: true, containerPort: 8089, servicePort: 8089, protocol: TCP }   # "real Splunk" TLS listener (proxy test)
+serviceMonitor: { enabled: true }
+# customer-sim-tls (hec.cobalt.example, signed by the "Cobalt Splunk Server CA") is created by
+# deploy/observability/proxy-sim/install.sh; optional so the plain-HTTP sink works without it.
+extraVolumes:
+  - { name: received, emptyDir: {} }
+  - { name: tls, secret: { secretName: customer-sim-tls, optional: true } }
+extraVolumeMounts:
+  - { name: received, mountPath: /received }
+  - { name: tls, mountPath: /tls, readOnly: true }
+extraContainers:
+  - name: inspector                      # kubectl -n customer-sim exec deploy/customer-sim -c inspector -- ...
+    image: ghcr.io/astral-sh/uv:python3.14-bookworm-slim
+    imagePullPolicy: IfNotPresent
+    command: ["sleep", "infinity"]
+    resources: { limits: { memory: 256Mi } }
+    volumeMounts: [{ name: received, mountPath: /received, readOnly: true }]
+config:
+  receivers:
+    jaeger: null
+    zipkin: null
+    prometheus: null
+    otlp: null
+    splunk_hec: { endpoint: "0.0.0.0:8088" }   # Cobalt's HEC endpoint: https://<hec-host>:8088/services/collector
+    splunk_hec/tls:                            # what the TLS-inspecting proxy connects to (M7 proxy test)
+      endpoint: "0.0.0.0:8089"
+      tls: { cert_file: /tls/tls.crt, key_file: /tls/tls.key }
+  processors: { batch: null }
+  exporters:
+    debug: { verbosity: basic }
+    file/received: { path: /received/logs.jsonl }
+  service:
+    pipelines:
+      logs: { receivers: [splunk_hec, splunk_hec/tls], processors: [memory_limiter], exporters: [file/received, debug] }
+      traces: null
+      metrics: null

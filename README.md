@@ -6,7 +6,7 @@ A learning build from the FDE Onboarding Handbook: Beacon's standard observabili
 - dashboards and SLO burn-rate alerts as code;
 - a customer-export overlay for Splunk or Datadog behind a TLS-inspecting proxy.
 
-**Status:** M0–M6 done (Tier A kind, P04-lite app, instrumentation hygiene, Prometheus with the OTLP receiver, Tempo and Loki, gateway and agent Collectors, RED/USE/Flow dashboards, Sloth SLOs with burn-rate alerts). Progress: [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md); departures from the spec: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md). The build is done in **Claude Code cloud sessions**, following [`docs/CLOUD_BUILD_PROMPT.md`](docs/CLOUD_BUILD_PROMPT.md).
+**Status:** M0–M7 done (Tier A kind, P04-lite app, instrumentation hygiene, Prometheus with the OTLP receiver, Tempo and Loki, gateway and agent Collectors, RED/USE/Flow dashboards, Sloth SLOs with burn-rate alerts, customer export mode). Progress: [`docs/BUILD_LOG.md`](docs/BUILD_LOG.md); departures from the spec: [`docs/DEVIATIONS.md`](docs/DEVIATIONS.md). The build is done in **Claude Code cloud sessions**, following [`docs/CLOUD_BUILD_PROMPT.md`](docs/CLOUD_BUILD_PROMPT.md).
 
 | Path | What it is |
 |---|---|
@@ -126,6 +126,20 @@ python3 deploy/observability/dashboards/generate.py
 
 ```bash
 kubectl apply -f deploy/observability/dashboards/
+```
+
+Customer export mode (Cobalt/Splunk; see docs/BUILD_LOG.md M7): the token Secret, the stand-in sink, the overlay.
+
+```bash
+kubectl -n observability create secret generic customer-splunk-hec --from-literal=token=lab-only-token
+```
+
+```bash
+helm install customer-sim open-telemetry/opentelemetry-collector --version 0.173.1 -n customer-sim --create-namespace -f deploy/observability/customer-sim-values.yaml --wait
+```
+
+```bash
+helm upgrade otel-gateway open-telemetry/opentelemetry-collector --version 0.173.1 -n observability -f deploy/observability/otel-gateway-values.yaml -f deploy/observability/export-splunk-values.yaml --wait
 ```
 
 Port-forward Prometheus:
